@@ -19,7 +19,7 @@ Semantic memory and code intelligence as an MCP plugin for Claude Code agents.
 | `search_code(query)` | Hybrid RAG over indexed codebase (4 modes, reranker, name filter) |
 | `get_symbol(symbol_id)` | Retrieve a symbol by UUID — direct Qdrant lookup, no file I/O |
 | `find_usages(symbol_id)` | Find callers/references of a symbol (lexical + semantic, self-excluded) |
-| `get_file_context(file_path)` | Read file + list indexed symbols |
+| `get_file_context(file_path)` | Read file + list indexed symbols with UUIDs for `get_symbol`/`find_usages` |
 | `get_dependencies(file_path)` | Import graph traversal (forward / reverse / transitive) |
 | `project_overview()` | 3-level directory tree, entry points, top imports |
 | `forget(memory_id)` | Delete a memory permanently |
@@ -334,17 +334,21 @@ search_code("embed vector", name_pattern="embed")
 
 ### Symbol-aware workflow
 
-Each `search_code` result includes an `id:` UUID field. Use it with the two symbol tools:
+Every symbol UUID surface (`search_code`, `get_file_context`) feeds directly into the two symbol tools:
 
 ```
-# 1. Find a symbol
+# From search
 search_code("parse imports typescript")
 # → id:  abc-123-...  file: src/parser.ts  name: extractImports
 
-# 2. Read it directly (no file I/O)
+# From file listing
+get_file_context("src/parser.ts")
+# → function  extractImports  (lines 248–264)  id: abc-123-...
+
+# Read the symbol directly (no file I/O)
 get_symbol("abc-123-...")
 
-# 3. Find what calls it
+# Find all callers / references
 find_usages("abc-123-...", limit=20)
 # Returns [lexical] hits (literal name match) + [semantic] hits (conceptual match), self-excluded
 ```
@@ -373,7 +377,10 @@ Other indexer commands:
 local-rag clear --config .memory.json    # remove all indexed chunks
 local-rag stats --config .memory.json    # show collection statistics
 local-rag file <abs-path> <root>         # index a single file
+local-rag repair . --config .memory.json # fix empty symbol names (payload-only, no re-embedding)
 ```
+
+`repair` is useful after updating to a version with improved parser extraction logic: it patches only the `name` field for affected chunks without regenerating embeddings or descriptions.
 
 ---
 
