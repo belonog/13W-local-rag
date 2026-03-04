@@ -1,8 +1,36 @@
-import { watch, existsSync } from "node:fs";
-import { resolve, join, relative } from "node:path";
+import chokidar from "chokidar";
+import { existsSync, readdirSync } from "node:fs";
+import { resolve, relative, join } from "node:path";
 import type { CodeIndexer } from "./indexer.js";
+import { GitignoreFilter } from "./gitignore.js";
 import { cfg } from "../config.js";
 import { recordIndex } from "../dashboard.js";
+
+// Directories that must never receive inotify watches (mirrors IGNORE_DIRS in indexer.ts)
+const WATCH_IGNORED = [
+  /[/\\]\.(git|svn|hg)([/\\]|$)/,
+  /[/\\]node_modules([/\\]|$)/,
+  /[/\\](dist|build|\.next|coverage|vendor|charts|testdata)([/\\]|$)/,
+];
+
+function buildGitignoreFilter(root: string): GitignoreFilter {
+  const filter = new GitignoreFilter();
+  const walk = (dir: string) => {
+    filter.addDir(dir);
+    try {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const abs = join(dir, entry.name);
+        if (entry.name.startsWith(".")) continue;
+        if (WATCH_IGNORED.some((r) => r.test(abs))) continue;
+        if (filter.isIgnored(abs)) continue;
+        walk(abs);
+      }
+    } catch { /* skip unreadable dirs */ }
+  };
+  walk(root);
+  return filter;
+}
 
 export function startWatcher(
   root: string,
@@ -10,12 +38,19 @@ export function startWatcher(
   onReindex?: (relPath: string, chunks: number) => void,
 ): void {
   const absRoot = resolve(root);
+  const gitFilter = buildGitignoreFilter(absRoot);
 
-  const watcher = watch(absRoot, { recursive: true }, (event, filename) => {
-    if (!filename) return;
-    const absPath  = resolve(join(absRoot, filename));
+  const watcher = chokidar.watch(absRoot, {
+    ignored: (absPath: string) =>
+      WATCH_IGNORED.some((r) => r.test(absPath)) || gitFilter.isIgnored(absPath),
+    ignoreInitial: true,
+    persistent: false,
+    usePolling: false,
+    awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
+  });
+
+  const handle = (absPath: string) => {
     if (indexer.shouldSkip(absPath)) return;
-
     const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : absRoot;
     const relPath  = relative(pathBase, absPath).replace(/\\/g, "/");
 
@@ -45,11 +80,9 @@ export function startWatcher(
           recordIndex(relPath, 0, Date.now() - t1, false);
         });
     }
-  });
+  };
 
-  // Allow the process to exit naturally when the MCP transport closes.
-  // Without unref(), fs.watch keeps the event loop alive indefinitely.
-  watcher.unref();
+  watcher.on("add", handle).on("change", handle).on("unlink", handle);
 
   process.stderr.write(`[watcher] Watching ${absRoot}\n`);
 }

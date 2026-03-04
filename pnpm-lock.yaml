@@ -20,6 +20,9 @@ importers:
       '@qdrant/js-client-rest':
         specifier: ^1.17.0
         version: 1.17.0(typescript@5.9.3)
+      chokidar:
+        specifier: ^5.0.0
+        version: 5.0.0
       fastify:
         specifier: ^5.4.0
         version: 5.7.4

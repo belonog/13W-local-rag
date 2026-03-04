@@ -28,6 +28,7 @@ export class CodeIndexer {
   private readonly genDescs: boolean;
   private resolver: ImportResolver    | null = null;
   private ignFilter: GitignoreFilter  | null = null;
+  private _indexInFlight = new Map<string, Promise<number>>();
 
   constructor(opts: { generateDescriptions?: boolean } = {}) {
     this.qd       = new QdrantClient({ url: cfg.qdrantUrl });
@@ -225,6 +226,17 @@ export class CodeIndexer {
   }
 
   async indexFile(absPath: string, root: string): Promise<number> {
+    const prev = this._indexInFlight.get(absPath) ?? Promise.resolve(0);
+    const next = prev.catch(() => 0).then(() => this._indexFileImpl(absPath, root));
+    this._indexInFlight.set(absPath, next);
+    next.finally(() => {
+      if (this._indexInFlight.get(absPath) === next)
+        this._indexInFlight.delete(absPath);
+    });
+    return next;
+  }
+
+  private async _indexFileImpl(absPath: string, root: string): Promise<number> {
     const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
     const relPath  = relative(pathBase, absPath).replace(/\\/g, "/");
     if (!this.resolver) {

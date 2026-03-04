@@ -38,19 +38,27 @@ export async function getFileContextTool(a: GetFileContextArgs): Promise<string>
     })
     .catch((): { points: [] } => ({ points: [] }));
 
-  const symbols = scrollResult.points.map((p) => {
-    const pl = (p.payload ?? {}) as Record<string, unknown>;
-    return {
-      id:         String(p.id),
-      name:       String(pl["name"]      ?? ""),
-      chunkType:  String(pl["chunk_type"]?? ""),
-      startLine:  Number(pl["start_line"] ?? 0),
-      endLine:    Number(pl["end_line"]   ?? 0),
-      signature:  String(pl["signature"] ?? ""),
-      isParent:   Boolean(pl["is_parent"]),
-      parentId:   pl["parent_id"] ? String(pl["parent_id"]) : undefined,
-    };
-  });
+  const seen = new Set<string>();
+  const symbols = scrollResult.points
+    .map((p) => {
+      const pl = (p.payload ?? {}) as Record<string, unknown>;
+      return {
+        id:         String(p.id),
+        name:       String(pl["name"]      ?? ""),
+        chunkType:  String(pl["chunk_type"]?? ""),
+        startLine:  Number(pl["start_line"] ?? 0),
+        endLine:    Number(pl["end_line"]   ?? 0),
+        signature:  String(pl["signature"] ?? ""),
+        isParent:   Boolean(pl["is_parent"]),
+        parentId:   pl["parent_id"] ? String(pl["parent_id"]) : undefined,
+      };
+    })
+    .filter((s) => {
+      const key = `${s.chunkType}:${s.name}:${s.startLine}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 
   // Determine line range to return
   let startLine: number;

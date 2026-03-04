@@ -69,6 +69,7 @@ const TS_EXTRACT_NODES = new Set([
   "function_signature", "class_declaration", "abstract_class_declaration",
   "interface_declaration", "type_alias_declaration", "enum_declaration",
   "export_statement", "lexical_declaration",
+  "variable_declarator",
 ]);
 
 function extractNameIdentifier(node: SyntaxNode): string {
