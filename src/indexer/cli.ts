@@ -79,7 +79,7 @@ if (cmd === "index") {
   if (!arg2) { process.stderr.write("Usage: cli.js file <abs-path> [root]\n"); process.exit(1); }
   const absPath = resolve(arg2);
   const root    = resolve(arg3 ?? ".");
-  const n = await indexer.indexFile(absPath, root);
+  const [n] = await indexer.indexFile(absPath, root);
   process.stdout.write(`${n} chunks indexed\n`);
   process.exit(0);
 

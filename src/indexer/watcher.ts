@@ -58,10 +58,10 @@ export function startWatcher(
       const t0 = Date.now();
       indexer
         .indexFile(absPath, absRoot)
-        .then((n) => {
+        .then(([n, ms]) => {
           if (n === 0) return;
           process.stderr.write(`[watcher] re-indexed ${relPath}: ${n} chunks\n`);
-          recordIndex(relPath, n, Date.now() - t0, true);
+          recordIndex(relPath, n, ms, true);
           onReindex?.(relPath, n);
         })
         .catch((err: unknown) => {

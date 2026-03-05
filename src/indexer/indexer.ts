@@ -28,7 +28,7 @@ export class CodeIndexer {
   private readonly genDescs: boolean;
   private resolver: ImportResolver    | null = null;
   private ignFilter: GitignoreFilter  | null = null;
-  private _indexInFlight = new Map<string, Promise<number>>();
+  private _indexInFlight = new Map<string, Promise<[number, number]>>();
 
   constructor(opts: { generateDescriptions?: boolean } = {}) {
     this.qd       = new QdrantClient({ url: cfg.qdrantUrl });
@@ -225,9 +225,9 @@ export class CodeIndexer {
     return results;
   }
 
-  async indexFile(absPath: string, root: string): Promise<number> {
-    const prev = this._indexInFlight.get(absPath) ?? Promise.resolve(0);
-    const next = prev.catch(() => 0).then(() => this._indexFileImpl(absPath, root));
+  async indexFile(absPath: string, root: string): Promise<[number, number]> {
+    const prev = this._indexInFlight.get(absPath) ?? Promise.resolve([0, 0] as [number, number]);
+    const next = prev.catch((): [number, number] => [0, 0]).then(() => this._indexFileImpl(absPath, root));
     this._indexInFlight.set(absPath, next);
     next.finally(() => {
       if (this._indexInFlight.get(absPath) === next)
@@ -236,7 +236,8 @@ export class CodeIndexer {
     return next;
   }
 
-  private async _indexFileImpl(absPath: string, root: string): Promise<number> {
+  private async _indexFileImpl(absPath: string, root: string): Promise<[number, number]> {
+    const t0 = Date.now();
     const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
     const relPath  = relative(pathBase, absPath).replace(/\\/g, "/");
     if (!this.resolver) {
@@ -247,8 +248,8 @@ export class CodeIndexer {
 
     const storedHash = await this.getFileHash(relPath);
     if (storedHash === newHash) {
-      if (!this.genDescs) return 0;
-      if (!(await this.missingDescriptions(relPath))) return 0;
+      if (!this.genDescs) return [0, 0];
+      if (!(await this.missingDescriptions(relPath))) return [0, 0];
       process.stderr.write(`[indexer] re-indexing for descriptions: ${relPath}\n`);
     }
 
@@ -258,7 +259,7 @@ export class CodeIndexer {
       if (this.resolver) {
         await clearDeps(cfg.projectId, relPath).catch(() => undefined);
       }
-      return 0;
+      return [0, 0];
     }
 
     await this.deleteFile(relPath);
@@ -402,9 +403,9 @@ export class CodeIndexer {
       points.push({ id, vector, payload });
     }
 
-    if (points.length === 0) return 0;
+    if (points.length === 0) return [0, 0];
     await this.qd.upsert(COLLECTION, { points });
-    return points.length;
+    return [points.length, Date.now() - t0];
   }
 
   async indexAll(root: string): Promise<void> {
@@ -418,9 +419,9 @@ export class CodeIndexer {
     let total = 0;
     for (let i = 0; i < files.length; i++) {
       const file = files[i]!;
-      const n = await this.indexFile(file, root).catch((err: unknown) => {
+      const [n] = await this.indexFile(file, root).catch((err: unknown) => {
         process.stderr.write(`[indexer] ${file}: ${String(err)}\n`);
-        return 0;
+        return [0, 0] as [number, number];
       });
       total += n;
       if ((i + 1) % 20 === 0) {
