@@ -283,24 +283,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name } = request.params;
   const a = (request.params.arguments ?? {}) as Record<string, unknown>;
 
-  // 1. Validate tool exists
-  const tool = TOOL_MAP.get(name);
-  if (!tool) {
-    throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
-  }
-
-  // 2. Validate required arguments are present
-  const required = (tool.inputSchema.required ?? []) as string[];
-  const missing = required.filter(k => !(k in a));
-  if (missing.length > 0) {
-    throw new McpError(ErrorCode.InvalidParams, `Missing required argument(s): ${missing.join(", ")}`);
-  }
-
   const bytesIn = JSON.stringify(a).length;
   const t0 = Date.now();
 
-  // 3. Execute; wrap unexpected errors as InternalError
   try {
+    // 1. Validate tool exists
+    const tool = TOOL_MAP.get(name);
+    if (!tool) throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+
+    // 2. Validate required arguments are present
+    const required = (tool.inputSchema.required ?? []) as string[];
+    const missing = required.filter(k => !(k in a));
+    if (missing.length > 0)
+      throw new McpError(ErrorCode.InvalidParams, `Missing required argument(s): ${missing.join(", ")}`);
+
+    // 3. Execute
     const text = await dispatchTool(name, a);
     record(name, "mcp", bytesIn, text.length, Date.now() - t0, true);
     return { content: [{ type: "text" as const, text }] };
@@ -308,10 +305,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const errStr = err instanceof Error ? (err.stack ?? err.message) : String(err);
     record(name, "mcp", bytesIn, 0, Date.now() - t0, false, errStr);
     if (err instanceof McpError) throw err;
-    throw new McpError(
-      ErrorCode.InternalError,
-      err instanceof Error ? err.message : String(err),
-    );
+    throw new McpError(ErrorCode.InternalError, err instanceof Error ? err.message : String(err));
   }
 });
 

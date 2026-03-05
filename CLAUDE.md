@@ -76,8 +76,8 @@ Search modes:
 |------|-----|
 | Find code by meaning / concept | `search_code` |
 | Find a symbol by exact name | Serena `find_symbol` |
-| Retrieve symbol by UUID (fast, no I/O) | `get_symbol(uuid)` |
-| Find callers / references of a symbol | `find_usages(uuid)` |
+| Retrieve symbol by UUID (fast, no I/O) | `get_symbol(symbol_id)` |
+| Find callers / references of a symbol | `find_usages(symbol_id)` |
 | Understand project structure | `project_overview` |
 | Read a file / symbol body | Serena `find_symbol(include_body=True)` or `get_file_context` |
 | Check who imports a file | `get_dependencies(direction="imported_by")` |

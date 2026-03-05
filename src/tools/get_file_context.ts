@@ -106,7 +106,7 @@ export async function getFileContextTool(a: GetFileContextArgs): Promise<string>
     lines.push("\n--- Indexed symbols in this file ---");
     for (const s of symbols) {
       const parentNote = s.parentId ? ` [child]` : s.isParent ? ` [parent]` : "";
-      lines.push(`  ${s.chunkType.padEnd(14)} ${s.name}  (lines ${s.startLine}–${s.endLine})${parentNote}  id: ${s.id}`);
+      lines.push(`  ${s.chunkType.padEnd(14)} ${s.name}  (lines ${s.startLine}–${s.endLine})${parentNote}  uuid: ${s.id}`);
     }
   }
 
