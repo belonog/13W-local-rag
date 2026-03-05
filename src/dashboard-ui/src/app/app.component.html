@@ -65,6 +65,24 @@
     </div>
   }
 
+  <!-- Reindex progress bar -->
+  @if (sse.reindex(); as p) {
+    <div class="mb-3 rounded-[4px] border border-(--color-indigo)/30 bg-(--color-indigo)/6 overflow-hidden shrink-0">
+      <div class="flex items-center justify-between px-3 py-1.5">
+        <span class="text-xs font-mono text-(--color-indigo)">
+          Indexing… {{ p.done }}&thinsp;/&thinsp;{{ p.total }} files
+        </span>
+        <span class="text-xs font-mono text-(--color-muted)">{{ p.chunks }} chunks</span>
+      </div>
+      <div class="h-1 bg-(--color-border)">
+        <div
+          class="h-full bg-(--color-indigo) transition-all duration-500"
+          [style.width]="(p.total > 0 ? p.done / p.total * 100 : 0) + '%'">
+        </div>
+      </div>
+    </div>
+  }
+
   <!-- Tab bar -->
   <div class="flex gap-0 border-b border-(--color-border) mb-3 shrink-0">
     <button

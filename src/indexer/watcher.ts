@@ -36,6 +36,8 @@ export function startWatcher(
   root: string,
   indexer: CodeIndexer,
   onReindex?: (relPath: string, chunks: number) => void,
+  onReady?: () => void,
+  ignoreInitial = false,
 ): void {
   const absRoot = resolve(root);
   const gitFilter = buildGitignoreFilter(absRoot);
@@ -43,7 +45,7 @@ export function startWatcher(
   const watcher = chokidar.watch(absRoot, {
     ignored: (absPath: string) =>
       WATCH_IGNORED.some((r) => r.test(absPath)) || gitFilter.isIgnored(absPath),
-    ignoreInitial: false,
+    ignoreInitial,
     persistent: false,
     usePolling: false,
     awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
@@ -84,6 +86,7 @@ export function startWatcher(
   };
 
   watcher.on("add", handle).on("change", handle).on("unlink", handle);
+  watcher.once("ready", () => onReady?.());
 
   process.stderr.write(`[watcher] Watching ${absRoot}\n`);
 }

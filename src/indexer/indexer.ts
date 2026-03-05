@@ -112,7 +112,7 @@ export class CodeIndexer {
     return false;
   }
 
-  private collectFiles(root: string): string[] {
+  collectFiles(root: string): string[] {
     // Build a fresh filter so rules discovered during recursion accumulate.
     const filter = new GitignoreFilter();
     this.ignFilter = filter;          // expose for shouldSkip / watcher
@@ -408,13 +408,20 @@ export class CodeIndexer {
     return [points.length, Date.now() - t0];
   }
 
-  async indexAll(root: string): Promise<void> {
+  async indexAll(
+    root: string,
+    opts?: {
+      suppressCountLog?: boolean;
+      onProgress?: (done: number, total: number, chunks: number) => void;
+    },
+  ): Promise<void> {
+    const { suppressCountLog = false, onProgress } = opts ?? {};
     const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : root;
     // Initialise resolver for dep graph — use pathBase so imports resolve
     // relative to project root, and tsconfig.json is found in the right place
     this.resolver = new ImportResolver({ root: pathBase });
     const files = this.collectFiles(root);
-    process.stderr.write(`[indexer] Found ${files.length} files\n`);
+    if (!suppressCountLog) process.stderr.write(`[indexer] Found ${files.length} files\n`);
 
     let total = 0;
     for (let i = 0; i < files.length; i++) {
@@ -424,6 +431,7 @@ export class CodeIndexer {
         return [0, 0] as [number, number];
       });
       total += n;
+      onProgress?.(i + 1, files.length, n);
       if ((i + 1) % 20 === 0) {
         process.stderr.write(`[indexer] [${i + 1}/${files.length}] ${total} chunks\n`);
       }

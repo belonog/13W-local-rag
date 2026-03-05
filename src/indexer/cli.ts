@@ -54,14 +54,22 @@ async function expandRoots(root: string): Promise<string[]> {
 if (cmd === "index") {
   const root  = resolve(arg2 ?? ".");
   const roots = await expandRoots(root);
-  for (const r of roots) await indexer.indexAll(r);
+  // Pre-collect files across all roots for combined total
+  const fileLists = roots.map(r => indexer.collectFiles(r));
+  const totalFiles = fileLists.reduce((s, f) => s + f.length, 0);
+  process.stderr.write(`[indexer] Found ${totalFiles} files\n`);
+  for (const r of roots) await indexer.indexAll(r, { suppressCountLog: true });
   process.exit(0);
 
 } else if (cmd === "watch") {
   const root  = resolve(arg2 ?? ".");
   const roots = await expandRoots(root);
+  // Pre-collect files across all roots for combined total
+  const fileLists = roots.map(r => indexer.collectFiles(r));
+  const totalFiles = fileLists.reduce((s, f) => s + f.length, 0);
+  process.stderr.write(`[indexer] Found ${totalFiles} files\n`);
   for (const r of roots) {
-    await indexer.indexAll(r);
+    await indexer.indexAll(r, { suppressCountLog: true });
     startWatcher(r, indexer);
   }
   process.on("SIGINT",  () => process.exit(0));

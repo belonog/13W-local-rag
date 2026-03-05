@@ -54,6 +54,12 @@ export interface ProcessError {
   ts:      number;
 }
 
+export interface ReindexProgress {
+  total:  number;
+  done:   number;
+  chunks: number;
+}
+
 export interface InitData {
   stats:      Record<string, ToolStats>;
   log:        RequestEntry[];

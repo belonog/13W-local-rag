@@ -7,8 +7,9 @@ import {
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import { resolve } from "node:path";
 import { ensureCollections } from "./qdrant.js";
-import { record, startDashboard, broadcastShutdown, broadcastError } from "./dashboard.js";
+import { record, startDashboard, broadcastShutdown, broadcastError, startReindex, tickReindex, endReindex } from "./dashboard.js";
 import { CodeIndexer }  from "./indexer/indexer.js";
 import { startWatcher } from "./indexer/watcher.js";
 import { cfg } from "./config.js";
@@ -329,15 +330,33 @@ process.on("unhandledRejection", (reason: unknown) => {
 await ensureCollections();
 if (cfg.dashboard) startDashboard(cfg.dashboardPort, TOOLS, dispatchTool);
 if (cfg.watch) {
-  const root = cfg.projectRoot || process.cwd();
+  const root    = cfg.projectRoot || process.cwd();
+  const absRoot = resolve(root);
   const indexer = new CodeIndexer({ generateDescriptions: cfg.generateDescriptions });
-  startWatcher(root, indexer, (relPath, chunks) => {
+
+  const onReindex = (relPath: string, chunks: number) => {
     server.notification({
       method: "notifications/message",
       params: { level: "info", logger: "watcher", data: `Reindexed ${relPath}: ${chunks} chunks` },
     }).catch((err: unknown) => {
       process.stderr.write(`[watcher] notification error: ${String(err)}\n`);
     });
+  };
+
+  // Initial scan: indexAll tracks every file (incl. unchanged), so progress is accurate.
+  // After scan, watcher starts with ignoreInitial=true (changes only).
+  const files = indexer.collectFiles(absRoot);
+  startReindex(files.length);
+  indexer.indexAll(absRoot, {
+    suppressCountLog: true,
+    onProgress: (_done, _total, chunks) => tickReindex(chunks),
+  }).then(() => {
+    endReindex();
+    startWatcher(root, indexer, onReindex, undefined, true);
+  }).catch((err: unknown) => {
+    process.stderr.write(`[indexer] initial scan error: ${String(err)}\n`);
+    endReindex();
+    startWatcher(root, indexer, onReindex, undefined, true);
   });
 }
 process.stderr.write("[memory] MCP server ready\n");

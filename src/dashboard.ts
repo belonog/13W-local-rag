@@ -69,6 +69,16 @@ const LOG_MAX    = 500;
 const requestLog: RequestEntry[] = [];
 const sseClients = new Set<ServerResponse>();
 
+// ── Watcher SSE throttle ──────────────────────────────────────────────────────
+let _watcherFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let _watcherLastSse = 0;
+
+// ── Reindex progress ──────────────────────────────────────────────────────────
+interface ReindexProgress { total: number; done: number; chunks: number; }
+let _reindexProgress: ReindexProgress | null = null;
+let _reindexTimer: ReturnType<typeof setTimeout> | null = null;
+let _reindexLastSent = 0;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function statsSnapshot(): Record<string, ToolStats & { avgMs: number; tokensEst: number }> {
@@ -106,8 +116,25 @@ export function recordIndex(relPath: string, chunks: number, ms: number, ok: boo
   const entry: RequestEntry = { ts: Date.now(), tool: relPath, source: "watcher", bytesIn: 0, bytesOut: 0, ms, ok, chunks };
   requestLog.push(entry);
   if (requestLog.length > LOG_MAX) requestLog.shift();
-  const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot() })}\n\n`;
-  for (const res of new Set(sseClients)) res.write(data);
+
+  // Throttle SSE writes to at most once per second
+  const elapsed = Date.now() - _watcherLastSse;
+  if (elapsed >= 1_000) {
+    if (_watcherFlushTimer) { clearTimeout(_watcherFlushTimer); _watcherFlushTimer = null; }
+    _watcherLastSse = Date.now();
+    const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot() })}\n\n`;
+    for (const res of new Set(sseClients)) res.write(data);
+  } else if (!_watcherFlushTimer) {
+    _watcherFlushTimer = setTimeout(() => {
+      _watcherFlushTimer = null;
+      _watcherLastSse = Date.now();
+      const last = requestLog[requestLog.length - 1];
+      if (last?.source === "watcher") {
+        const data = `data: ${JSON.stringify({ type: "entry", entry: last, stats: statsSnapshot() })}\n\n`;
+        for (const res of new Set(sseClients)) res.write(data);
+      }
+    }, 1_000 - elapsed);
+  }
 }
 
 function openBrowser(url: string): void {
@@ -168,7 +195,7 @@ fastify.get("/events", (req, reply) => {
   raw.setHeader("Cache-Control", "no-cache");
   raw.setHeader("Connection",    "keep-alive");
   raw.flushHeaders();
-  raw.write(`data: ${JSON.stringify({ type: "init", stats: statsSnapshot(), log: requestLog })}\n\n`);
+  raw.write(`data: ${JSON.stringify({ type: "init", stats: statsSnapshot(), log: requestLog, reindex: _reindexProgress })}\n\n`);
   sseClients.add(raw);
   req.raw.on("close", () => { sseClients.delete(raw); });
 });
@@ -196,6 +223,46 @@ fastify.post<{ Body: { tool: string; args: Record<string, unknown> } }>("/api/ru
 });
 
 // ── Exports ───────────────────────────────────────────────────────────────────
+
+// ── Reindex progress exports ──────────────────────────────────────────────────
+
+function _broadcastReindex(): void {
+  if (!_active || !_reindexProgress) return;
+  _reindexLastSent = Date.now();
+  const data = `data: ${JSON.stringify({ type: "reindex", progress: { ..._reindexProgress } })}\n\n`;
+  for (const res of new Set(sseClients)) res.write(data);
+}
+
+export function startReindex(total: number): void {
+  if (_reindexTimer) { clearTimeout(_reindexTimer); _reindexTimer = null; }
+  _reindexProgress = { total, done: 0, chunks: 0 };
+  _reindexLastSent = 0;
+  _broadcastReindex();
+}
+
+export function tickReindex(chunks: number): void {
+  if (!_active || !_reindexProgress) return;
+  _reindexProgress.done++;
+  _reindexProgress.chunks += chunks;
+  const elapsed = Date.now() - _reindexLastSent;
+  if (elapsed >= 1_000) {
+    if (_reindexTimer) { clearTimeout(_reindexTimer); _reindexTimer = null; }
+    _broadcastReindex();
+  } else if (!_reindexTimer) {
+    _reindexTimer = setTimeout(() => {
+      _reindexTimer = null;
+      _broadcastReindex();
+    }, 1_000 - elapsed);
+  }
+}
+
+export function endReindex(): void {
+  if (!_reindexProgress) return;
+  if (_reindexTimer) { clearTimeout(_reindexTimer); _reindexTimer = null; }
+  _reindexProgress.done = _reindexProgress.total;
+  _broadcastReindex();
+  _reindexProgress = null;
+}
 
 export function startDashboard(port: number, toolSchemas: ToolSchemaDef[], dispatch: DispatchFn): void {
   _active = true;
