@@ -43,7 +43,7 @@ export function startWatcher(
   const watcher = chokidar.watch(absRoot, {
     ignored: (absPath: string) =>
       WATCH_IGNORED.some((r) => r.test(absPath)) || gitFilter.isIgnored(absPath),
-    ignoreInitial: true,
+    ignoreInitial: false,
     persistent: false,
     usePolling: false,
     awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
@@ -59,6 +59,7 @@ export function startWatcher(
       indexer
         .indexFile(absPath, absRoot)
         .then((n) => {
+          if (n === 0) return;
           process.stderr.write(`[watcher] re-indexed ${relPath}: ${n} chunks\n`);
           recordIndex(relPath, n, Date.now() - t0, true);
           onReindex?.(relPath, n);
