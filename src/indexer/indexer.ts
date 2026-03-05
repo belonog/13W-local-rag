@@ -492,6 +492,19 @@ export class CodeIndexer {
     const fileCount = new Set(affected.map((a) => a.filePath)).size;
     process.stderr.write(`[repair] ${affected.length} unnamed chunks across ${fileCount} files\n`);
 
+    // Build alternate bases from includePaths (fallback for path-root mismatches)
+    const altBases: string[] = [];
+    if (cfg.includePaths.length > 0) {
+      const { glob, lstat } = await import("node:fs/promises");
+      for await (const match of glob(cfg.includePaths, { cwd: pathBase })) {
+        const abs = join(pathBase, match);
+        try {
+          const s = await lstat(abs);
+          if (s.isDirectory()) altBases.push(abs);
+        } catch { /* skip */ }
+      }
+    }
+
     // 2. Group by file
     const byFile = new Map<string, typeof affected>();
     for (const a of affected) {
@@ -501,46 +514,68 @@ export class CodeIndexer {
     }
 
     // 3. Re-parse each file and patch payload only (vectors/descriptions untouched)
-    let fixed = 0;
+    let fixed = 0, stillEmpty = 0, unfound = 0, skippedChunks = 0, skippedFiles = 0;
     for (const [relPath, points] of byFile) {
-      const absPath = join(pathBase, relPath);
-      let source: string;
+      // Try primary base, then each altBase
+      let source: string | undefined;
+      let resolvedBase = pathBase;
       try {
-        source = readFileSync(absPath, "utf8");
+        source = readFileSync(join(pathBase, relPath), "utf8");
       } catch {
+        for (const base of altBases) {
+          try {
+            source = readFileSync(join(base, relPath), "utf8");
+            resolvedBase = base;
+            break;
+          } catch { /* try next */ }
+        }
+      }
+      if (source === undefined) {
         process.stderr.write(`[repair] cannot read ${relPath}, skipping\n`);
+        skippedFiles++;
+        skippedChunks += points.length;
         continue;
       }
 
-      const chunks = await parseFile(relPath, source).catch(() => [] as CodeChunk[]);
+      // Re-parse relative to the base that found the file
+      const effectiveRelPath = relative(pathBase, join(resolvedBase, relPath)).replace(/\\/g, "/");
+      const chunks = await parseFile(effectiveRelPath, source).catch(() => [] as CodeChunk[]);
 
       // Primary key: chunkType:startLine (exact match)
       // Fallback key: content (handles line-shift when file modified since indexing)
-      const chunkMap   = new Map<string, string>(); // chunkType:startLine → name
-      const contentMap = new Map<string, string>(); // content → name
+      const allKeysFound  = new Set<string>();
+      const chunkMap      = new Map<string, string>(); // chunkType:startLine → name
+      const contentMap    = new Map<string, string>(); // content → name
+
       for (const c of chunks) {
+        const key = `${c.chunkType}:${c.startLine}`;
+        allKeysFound.add(key);
+        if (c.content) allKeysFound.add(c.content);
         if (c.name) {
-          chunkMap.set(`${c.chunkType}:${c.startLine}`, c.name);
+          chunkMap.set(key, c.name);
           if (c.content) contentMap.set(c.content, c.name);
         }
       }
 
       for (const p of points) {
         const name = chunkMap.get(`${p.chunkType}:${p.startLine}`) ?? contentMap.get(p.content);
-        if (!name) continue;
+        if (!name) {
+          const found = allKeysFound.has(`${p.chunkType}:${p.startLine}`) || allKeysFound.has(p.content);
+          if (found) stillEmpty++; else unfound++;
+          continue;
+        }
         await this.qd.setPayload(COLLECTION, { payload: { name }, points: [p.id], wait: true } as never);
         fixed++;
       }
     }
 
     process.stderr.write(`[repair] Done: ${fixed}/${affected.length} chunks repaired\n`);
-    const unresolved = affected.length - fixed;
-    if (unresolved > 0) {
-      process.stderr.write(
-        `[repair] ${unresolved} chunks could not be matched — ` +
-        `run 'local-rag index <root>' to fully re-index those files.\n`,
-      );
-    }
+    if (skippedChunks > 0)
+      process.stderr.write(`[repair] ${skippedChunks} chunks in ${skippedFiles} files could not be read (path not found)\n`);
+    if (stillEmpty > 0)
+      process.stderr.write(`[repair] ${stillEmpty} chunks still have no parseable name (parser fix needed)\n`);
+    if (unfound > 0)
+      process.stderr.write(`[repair] ${unfound} chunks could not be matched — run 'local-rag index <root>' to fully re-index those files.\n`);
   }
 
   async clear(): Promise<void> {

@@ -14,7 +14,7 @@ interface LanguageDef {
   readonly extractNodes:   ReadonlySet<string>;
   readonly chunkTypeMap:   Readonly<Record<string, string>>;
   readonly containerNodes: ReadonlySet<string>;
-  readonly extractName:    (node: SyntaxNode) => string;
+  readonly extractName:    (node: SyntaxNode, parent?: SyntaxNode, grandparent?: SyntaxNode) => string;
   readonly docStyle:       "jsdoc" | "slashslash" | "none";
   readonly importNode?:    string;
 }
@@ -86,26 +86,123 @@ function firstBindingFromPattern(node: SyntaxNode): string {
   return "";
 }
 
-function extractNameIdentifier(node: SyntaxNode): string {
+/** Extract the last meaningful name from a callee expression.
+ * Handles: identifier, member_expression (obj.method), call_expression (fn.each([])). */
+function calleeLastName(node: SyntaxNode): string {
+  if (node.type === "identifier" || node.type === "property_identifier") return node.text;
+  // member_expression (app.get, describe.each) → last property_identifier/identifier
+  if (node.type === "member_expression") {
+    const rev = [...node.children].reverse();
+    const id = rev.find((c) => c.type === "identifier" || c.type === "property_identifier");
+    if (id) return id.text;
+  }
+  // call_expression callee: describe.each([...]) → recurse into its callee
+  if (node.type === "call_expression" && node.children[0]) {
+    return calleeLastName(node.children[0]);
+  }
+  // Generic fallback: last identifier found in any child
+  const rev = [...node.children].reverse();
+  for (const child of rev) {
+    const name = calleeLastName(child);
+    if (name) return name;
+  }
+  return "";
+}
+
+function extractNameIdentifier(node: SyntaxNode, parent?: SyntaxNode, grandparent?: SyntaxNode): string {
+  // If an anonymous function is a class field value, name it after the field
+  if (
+    parent?.type === "field_definition" ||
+    parent?.type === "public_field_definition"
+  ) {
+    const propId = parent.children.find(
+      (c) => c.type === "property_identifier" || c.type === "private_property_identifier",
+    );
+    if (propId) return propId.text;
+  }
+  // Arrow/function assigned as an object literal property: { handleClick: () => {} }
+  if (parent?.type === "pair") {
+    const key = parent.children.find(
+      (c) => c.type === "property_identifier" || c.type === "string",
+    );
+    if (key) return key.type === "string" ? key.text.slice(1, -1) : key.text;
+  }
+  // Function assigned via assignment expression: exports.foo = () => {}, this.handler = fn
+  if (parent?.type === "assignment_expression") {
+    const lhs = parent.children[0];
+    if (lhs) {
+      if (lhs.type === "identifier" || lhs.type === "property_identifier") return lhs.text;
+      // member_expression (exports.foo, this.handler) → last identifier
+      const rev = [...lhs.children].reverse();
+      const id = rev.find((c) => c.type === "identifier" || c.type === "property_identifier");
+      if (id) return id.text;
+    }
+  }
+  // Callback passed as argument: app.get('/route', fn), new Worker(fn), describe.each([])(fn)
+  if (
+    parent?.type === "arguments" &&
+    (grandparent?.type === "call_expression" || grandparent?.type === "new_expression")
+  ) {
+    const callee =
+      grandparent.type === "new_expression"
+        ? grandparent.children.find(
+            (c) => c.type !== "new" && c.type !== "arguments" && c.type !== "type_arguments",
+          )
+        : grandparent.children[0];
+    if (callee) {
+      const name = calleeLastName(callee);
+      if (name) return name;
+    }
+  }
   let hasDefault = false;
   for (const child of node.children) {
     if (
       child.type === "identifier" ||
       child.type === "type_identifier" ||
-      child.type === "property_identifier"
+      child.type === "property_identifier" ||
+      child.type === "private_property_identifier"
     ) {
       return child.text;
     }
-    if (TS_EXTRACT_NODES.has(child.type)) return extractNameIdentifier(child);
+    if (TS_EXTRACT_NODES.has(child.type)) {
+      const name = extractNameIdentifier(child);
+      if (name) return name;   // non-empty → done
+      continue;                // empty → keep looking (hasDefault may still be set)
+    }
     // Destructuring LHS (object/array pattern) — grab first binding; don't fall through to RHS
     if (child.type === "object_pattern" || child.type === "array_pattern")
       return firstBindingFromPattern(child);
+    if (child.type === "export_clause") {
+      // export { foo, bar } — use the first exported name
+      for (const spec of child.children) {
+        if (spec.type === "export_specifier") {
+          const id = spec.children.find(
+            (c) => c.type === "identifier" || c.type === "type_identifier",
+          );
+          if (id) return id.text;
+        }
+      }
+    }
+    if (child.type === "namespace_export") {
+      // export * as ns from './foo' — use the alias, fall back to "*"
+      const id = child.children.find((c) => c.type === "identifier");
+      return id ? id.text : "*";
+    }
+    if (child.type === "*") {
+      // export * from './foo'
+      return "*";
+    }
+    if (child.type === "ambient_declaration") {
+      // export declare class Foo / export declare function foo
+      const name = extractNameIdentifier(child);
+      if (name) return name;
+    }
     if (child.type === "default") hasDefault = true;
   }
   return hasDefault ? "default" : "";
 }
 
-function extractNameField(node: SyntaxNode): string {
+function extractNameField(node: SyntaxNode, _parent?: SyntaxNode, _grandparent?: SyntaxNode): string {
   for (const child of node.children) {
     if (child.type === "identifier" || child.type === "type_identifier") return child.text;
     for (const grandchild of child.children) {
@@ -326,6 +423,8 @@ function walkTree(
   chunks: CodeChunk[],
   def: LanguageDef,
   parentKey?: string,
+  parent?: SyntaxNode,
+  grandparent?: SyntaxNode,
 ): void {
   if (def.extractNodes.has(node.type)) {
     const text = node.text;
@@ -339,7 +438,7 @@ function walkTree(
         content:   text,
         filePath,
         chunkType: def.chunkTypeMap[node.type] ?? "block",
-        name:      def.extractName(node),
+        name:      def.extractName(node, parent, grandparent),
         signature: getSignature(node),
         startLine: node.startPosition.row + 1,
         endLine:   node.endPosition.row + 1,
@@ -349,8 +448,7 @@ function walkTree(
       };
       if (parentKey !== undefined) chunk.parentKey = parentKey;
       chunks.push(chunk);
-      // Recurse with children knowing their parent's key
-      for (const child of node.children) walkTree(child, filePath, lines, chunks, def, myKey);
+      for (const child of node.children) walkTree(child, filePath, lines, chunks, def, myKey, node, parent);
       return;
     }
 
@@ -358,7 +456,7 @@ function walkTree(
       content:   text,
       filePath,
       chunkType: def.chunkTypeMap[node.type] ?? "block",
-      name:      def.extractName(node),
+      name:      def.extractName(node, parent, grandparent),
       signature: getSignature(node),
       startLine: node.startPosition.row + 1,
       endLine:   node.endPosition.row + 1,
@@ -368,10 +466,10 @@ function walkTree(
     };
     if (parentKey !== undefined) chunk.parentKey = parentKey;
     chunks.push(chunk);
-    return; // do not recurse into this node's children
+    return;
   }
 
-  for (const child of node.children) walkTree(child, filePath, lines, chunks, def, parentKey);
+  for (const child of node.children) walkTree(child, filePath, lines, chunks, def, parentKey, node, parent);
 }
 
 // ── data format parsers ───────────────────────────────────────────────────────
