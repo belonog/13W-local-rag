@@ -81,8 +81,13 @@ let _reindexLastSent = 0;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function statsSnapshot(): Record<string, ToolStats & { avgMs: number; tokensEst: number }> {
-  const out: Record<string, ToolStats & { avgMs: number; tokensEst: number }> = {};
+function memStats(): { rss: number; heapUsed: number; heapTotal: number; external: number } {
+  const m = process.memoryUsage();
+  return { rss: m.rss, heapUsed: m.heapUsed, heapTotal: m.heapTotal, external: m.external };
+}
+
+function statsSnapshot(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
   for (const [tool, s] of toolStats) {
     out[tool] = {
       ...s,
@@ -90,6 +95,7 @@ function statsSnapshot(): Record<string, ToolStats & { avgMs: number; tokensEst:
       tokensEst: Math.round((s.bytesIn + s.bytesOut) / 4),
     };
   }
+  out["_memory"] = memStats();
   return out;
 }
 

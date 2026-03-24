@@ -104,7 +104,7 @@ export async function recallTool(a: RecallArgs): Promise<string> {
 
   const lines = [`Found ${limited.length} memories:\n`];
   for (const [score, mt, mid, content, tagsS, date] of limited) {
-    lines.push(`[${score.toFixed(2)}] [${mt}] ${content.slice(0, 200)}`);
+    lines.push(`[${score.toFixed(2)}] [${mt}] ${content}`);
     lines.push(`  ${tagsS}  |  ${mid}  |  ${date}`);
     lines.push("");
   }

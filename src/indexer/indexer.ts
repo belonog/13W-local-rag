@@ -1,7 +1,6 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve, extname, basename } from "node:path";
 import { createHash } from "node:crypto";
-import { QdrantClient } from "@qdrant/js-client-rest";
 import { cfg } from "../config.js";
 import { embedBatch, embedOne, generateDescription } from "../embedder.js";
 import { parseFile, EXTENSIONS } from "./parser.js";
@@ -13,7 +12,7 @@ import {
   invalidateProjectOverview,
 } from "../storage.js";
 import type { CodeChunk } from "../types.js";
-import { CODE_VECTORS, colName } from "../qdrant.js";
+import { qd, CODE_VECTORS, colName } from "../qdrant.js";
 
 const COLLECTION  = colName("code_chunks");
 const BATCH_SIZE  = 32;
@@ -24,35 +23,33 @@ const IGNORE_DIRS = new Set([
 ]);
 
 export class CodeIndexer {
-  private readonly qd:       QdrantClient;
   private readonly genDescs: boolean;
   private resolver: ImportResolver    | null = null;
   private ignFilter: GitignoreFilter  | null = null;
   private _indexInFlight = new Map<string, Promise<[number, number]>>();
 
   constructor(opts: { generateDescriptions?: boolean } = {}) {
-    this.qd       = new QdrantClient({ url: cfg.qdrantUrl, timeout: 30_000 });
     this.genDescs = opts.generateDescriptions ?? false;
   }
 
   async ensureCollection(): Promise<void> {
-    const { collections } = await this.qd.getCollections();
+    const { collections } = await qd.getCollections();
     const existing = collections.find((c) => c.name === COLLECTION);
 
     if (existing) {
-      const info    = await this.qd.getCollection(COLLECTION);
+      const info    = await qd.getCollection(COLLECTION);
       const vectors = info.config?.params?.vectors as Record<string, unknown> | undefined;
       const hasNamedVectors = vectors !== undefined && CODE_VECTORS.code in vectors;
       if (hasNamedVectors) {
         // Idempotent: ensure all indexes exist (mirrors ensureCodeChunks in qdrant.ts).
-        await this.qd.createPayloadIndex(COLLECTION, { field_name: "imports", field_schema: "keyword", wait: true })
+        await qd.createPayloadIndex(COLLECTION, { field_name: "imports", field_schema: "keyword", wait: true })
           .catch(() => undefined);
         // Migrate name index from word → prefix tokenizer so name_pattern substring search works.
-        await this.qd.deletePayloadIndex(COLLECTION, "name").catch(() => undefined);
-        await this.qd.createPayloadIndex(COLLECTION, {
+        await qd.deletePayloadIndex(COLLECTION, "name").catch(() => undefined);
+        await qd.createPayloadIndex(COLLECTION, {
           field_name: "name", field_schema: { type: "text", tokenizer: "prefix", min_token_len: 2, lowercase: true }, wait: true,
         }).catch(() => undefined);
-        await this.qd.createPayloadIndex(COLLECTION, {
+        await qd.createPayloadIndex(COLLECTION, {
           field_name: "content", field_schema: { type: "text", tokenizer: "word", min_token_len: 2, lowercase: true }, wait: true,
         }).catch(() => undefined);
         return;
@@ -61,17 +58,17 @@ export class CodeIndexer {
       process.stderr.write(
         `[indexer] Migrating ${COLLECTION} to named vectors (existing index will be cleared)\n`
       );
-      await this.qd.deleteCollection(COLLECTION);
+      await qd.deleteCollection(COLLECTION);
     }
 
-    await this.qd.createCollection(COLLECTION, {
+    await qd.createCollection(COLLECTION, {
       vectors: {
         [CODE_VECTORS.code]:        { size: cfg.embedDim, distance: "Cosine" },
         [CODE_VECTORS.description]: { size: cfg.embedDim, distance: "Cosine" },
       },
     });
     for (const field of ["file_path", "chunk_type", "language", "project_id", "parent_id", "imports"]) {
-      await this.qd.createPayloadIndex(COLLECTION, {
+      await qd.createPayloadIndex(COLLECTION, {
         field_name:   field,
         field_schema: "keyword",
         wait:         true,
@@ -81,7 +78,7 @@ export class CodeIndexer {
       ["name",    { type: "text", tokenizer: "prefix", min_token_len: 2, lowercase: true }],
       ["content", { type: "text", tokenizer: "word",   min_token_len: 2, lowercase: true }],
     ] as const) {
-      await this.qd.createPayloadIndex(COLLECTION, { field_name: field, field_schema: schema, wait: true });
+      await qd.createPayloadIndex(COLLECTION, { field_name: field, field_schema: schema, wait: true });
     }
     process.stderr.write(`[indexer] Created collection '${COLLECTION}' (named vectors)\n`);
   }
@@ -146,7 +143,7 @@ export class CodeIndexer {
   }
 
   async deleteFile(relPath: string): Promise<void> {
-    await this.qd.delete(COLLECTION, {
+    await qd.delete(COLLECTION, {
       filter: {
         must: [
           { key: "file_path",  match: { value: relPath       } },
@@ -157,7 +154,7 @@ export class CodeIndexer {
   }
 
   private async getFileHash(relPath: string): Promise<string | null> {
-    const result = await this.qd.scroll(COLLECTION, {
+    const result = await qd.scroll(COLLECTION, {
       filter: {
         must: [
           { key: "file_path",  match: { value: relPath       } },
@@ -180,7 +177,7 @@ export class CodeIndexer {
    * without --generate-descriptions and needs a re-index.
    */
   private async missingDescriptions(relPath: string): Promise<boolean> {
-    const result = await this.qd.scroll(COLLECTION, {
+    const result = await qd.scroll(COLLECTION, {
       filter: {
         must: [
           { key: "file_path",  match: { value: relPath       } },
@@ -401,7 +398,7 @@ export class CodeIndexer {
     }
 
     if (points.length === 0) return [0, 0];
-    await this.qd.upsert(COLLECTION, { points });
+    await qd.upsert(COLLECTION, { points });
     return [points.length, Date.now() - t0];
   }
 
@@ -439,6 +436,9 @@ export class CodeIndexer {
     await invalidateProjectOverview(cfg.projectId).catch(() => undefined);
 
     process.stderr.write(`[indexer] Done: ${files.length} files, ${total} chunks\n`);
+
+    // Hint V8 to compact heap after bulk indexing (requires --expose-gc)
+    if (typeof globalThis.gc === "function") globalThis.gc();
   }
 
   /**
@@ -454,7 +454,7 @@ export class CodeIndexer {
 
     // 1. Collect all empty-name chunks for this project
     while (true) {
-      const result = await this.qd.scroll(COLLECTION, {
+      const result = await qd.scroll(COLLECTION, {
         filter: {
           must: [
             { key: "project_id", match: { value: cfg.projectId } },
@@ -561,7 +561,7 @@ export class CodeIndexer {
           if (found) stillEmpty++; else unfound++;
           continue;
         }
-        await this.qd.setPayload(COLLECTION, { payload: { name }, points: [p.id], wait: true } as never);
+        await qd.setPayload(COLLECTION, { payload: { name }, points: [p.id], wait: true } as never);
         fixed++;
       }
     }
@@ -576,14 +576,14 @@ export class CodeIndexer {
   }
 
   async clear(): Promise<void> {
-    await this.qd.delete(COLLECTION, {
+    await qd.delete(COLLECTION, {
       filter: { must: [{ key: "project_id", match: { value: cfg.projectId } }] },
     });
     process.stderr.write("[indexer] Index cleared\n");
   }
 
   async stats(): Promise<void> {
-    const info = await this.qd.getCollection(COLLECTION);
+    const info = await qd.getCollection(COLLECTION);
     process.stdout.write(
       `Code Index: ${info.points_count ?? 0} points, ${info.segments_count ?? 0} segments\n`
     );

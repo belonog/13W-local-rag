@@ -7,12 +7,23 @@ import type { Schemas } from "@qdrant/js-client-rest";
 type ScoredPoint = Schemas["ScoredPoint"];
 
 const MODEL = "Xenova/bge-reranker-base";
+const IDLE_MS = 5 * 60_000; // unload model after 5 min idle
 
 interface Singleton {
   tokenizer: Awaited<ReturnType<typeof AutoTokenizer.from_pretrained>>;
   model: Awaited<ReturnType<typeof AutoModelForSequenceClassification.from_pretrained>>;
 }
 let _singleton: Singleton | null = null;
+let _idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function resetIdle(): void {
+  if (_idleTimer) clearTimeout(_idleTimer);
+  _idleTimer = setTimeout(() => {
+    _singleton = null;
+    _idleTimer = null;
+    process.stderr.write("[reranker] model unloaded (idle timeout)\n");
+  }, IDLE_MS);
+}
 
 async function getSingleton(): Promise<Singleton> {
   if (!_singleton) {
@@ -59,6 +70,8 @@ export async function rerank(
   ) => Promise<{ logits: { data: ArrayLike<number> } }>)(inputs);
 
   const logitsArr = Array.from(output.logits.data);
+
+  resetIdle();
 
   return hits
     .map((h, i) => ({ ...h, score: sigmoid(logitsArr[i] ?? 0) }))
