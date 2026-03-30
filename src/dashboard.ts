@@ -95,7 +95,6 @@ function statsSnapshot(): Record<string, unknown> {
       tokensEst: Math.round((s.bytesIn + s.bytesOut) / 4),
     };
   }
-  out["_memory"] = memStats();
   return out;
 }
 
@@ -113,7 +112,7 @@ export function record(tool: string, source: "mcp" | "playground", bytesIn: numb
   requestLog.push(entry);
   if (requestLog.length > LOG_MAX) requestLog.shift();
 
-  const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot() })}\n\n`;
+  const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot(), memory: memStats() })}\n\n`;
   for (const res of new Set(sseClients)) res.write(data);
 }
 
@@ -128,7 +127,7 @@ export function recordIndex(relPath: string, chunks: number, ms: number, ok: boo
   if (elapsed >= 1_000) {
     if (_watcherFlushTimer) { clearTimeout(_watcherFlushTimer); _watcherFlushTimer = null; }
     _watcherLastSse = Date.now();
-    const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot() })}\n\n`;
+    const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot(), memory: memStats() })}\n\n`;
     for (const res of new Set(sseClients)) res.write(data);
   } else if (!_watcherFlushTimer) {
     _watcherFlushTimer = setTimeout(() => {
@@ -136,7 +135,7 @@ export function recordIndex(relPath: string, chunks: number, ms: number, ok: boo
       _watcherLastSse = Date.now();
       const last = requestLog[requestLog.length - 1];
       if (last?.source === "watcher") {
-        const data = `data: ${JSON.stringify({ type: "entry", entry: last, stats: statsSnapshot() })}\n\n`;
+        const data = `data: ${JSON.stringify({ type: "entry", entry: last, stats: statsSnapshot(), memory: memStats() })}\n\n`;
         for (const res of new Set(sseClients)) res.write(data);
       }
     }, 1_000 - elapsed);
@@ -188,6 +187,7 @@ fastify.get("/", async (_req, reply) => {
     log:        requestLog,
     schemas:    JSON.parse(_toolSchemasJson) as unknown[],
     serverInfo: JSON.parse(_serverInfoJson) as unknown,
+    memory:     memStats(),
   });
   const inject = `<script>window.__INIT__=${init}</script>`;
   const out    = html.replace("</head>", `${inject}\n</head>`);
@@ -201,13 +201,13 @@ fastify.get("/events", (req, reply) => {
   raw.setHeader("Cache-Control", "no-cache");
   raw.setHeader("Connection",    "keep-alive");
   raw.flushHeaders();
-  raw.write(`data: ${JSON.stringify({ type: "init", stats: statsSnapshot(), log: requestLog, reindex: _reindexProgress })}\n\n`);
+  raw.write(`data: ${JSON.stringify({ type: "init", stats: statsSnapshot(), log: requestLog, reindex: _reindexProgress, memory: memStats() })}\n\n`);
   sseClients.add(raw);
   req.raw.on("close", () => { sseClients.delete(raw); });
 });
 
 fastify.get("/api/stats", async (_req, _reply) => {
-  return statsSnapshot();
+  return { stats: statsSnapshot(), memory: memStats() };
 });
 
 fastify.post<{ Body: { tool: string; args: Record<string, unknown> } }>("/api/run", (req, reply) => {
