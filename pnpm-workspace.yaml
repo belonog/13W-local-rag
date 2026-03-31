@@ -11,5 +11,7 @@ ignoredBuiltDependencies:
 onlyBuiltDependencies:
   - esbuild
   - onnxruntime-node
+  - tree-sitter-go
   - tree-sitter-javascript
+  - tree-sitter-rust
   - tree-sitter-typescript
