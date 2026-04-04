@@ -2,14 +2,15 @@ import { readFileSync, existsSync } from "node:fs";
 import { cfg } from "./config.js";
 import { qd, colName } from "./qdrant.js";
 import { embedOne } from "./embedder.js";
-import { contentHash, nowIso, logHeadlessDecision } from "./util.js";
+import { contentHash, nowIso, logHeadlessDecision, buildValidationRequests } from "./util.js";
 import { runRouter, type RouterOp } from "./router.js";
 import type { SessionType } from "./types.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const WINDOW_CHARS      = 8_000;  // ≈ 2000 tokens at 4 chars/token
-const SIMILARITY_THRESH = 0.88;   // cosine threshold to recognise an existing entry
+const WINDOW_CHARS            = 8_000;  // ≈ 2000 tokens at 4 chars/token
+const SIMILARITY_THRESH       = 0.88;   // cosine threshold to recognise an existing entry
+const VALIDATION_MIN_CONFIDENCE = 0.5;  // min confidence to request validation
 
 const CONFIDENCE_THRESH: Record<SessionType, number> = {
   planning:    0.75,
@@ -233,11 +234,32 @@ export async function runHookRemember(): Promise<void> {
     const col       = colName(sessionType === "multi_agent" ? "memory_agents" : "memory");
     const threshold = CONFIDENCE_THRESH[sessionType];
 
-    // Process ops sequentially to avoid hammering the embedder.
+    // Split into three confidence bands.
+    const directOps:     RouterOp[] = [];
+    const validationOps: RouterOp[] = [];
+
     for (const op of ops) {
+      if (op.confidence >= threshold) {
+        directOps.push(op);
+      } else if (op.confidence >= VALIDATION_MIN_CONFIDENCE && sessionType !== "headless") {
+        validationOps.push(op);
+      } else if (sessionType === "headless") {
+        // Log ops that didn't meet the headless threshold.
+        logHeadlessDecision(cwd, op, /* written= */ false);
+      }
+    }
+
+    // Write high-confidence ops directly.
+    for (const op of directOps) {
       await processOp(op, col, sessionType, sessionId, agentId, cwd, threshold).catch((err: unknown) => {
         process.stderr.write(`[hook-remember] op failed: ${String(err)}\n`);
       });
+    }
+
+    // Emit systemMessage for validation candidates (non-headless only).
+    const systemMessage = buildValidationRequests(validationOps);
+    if (systemMessage) {
+      process.stdout.write(JSON.stringify({ systemMessage }) + "\n");
     }
   } catch (err: unknown) {
     process.stderr.write(`[hook-remember] ${String(err)}\n`);
