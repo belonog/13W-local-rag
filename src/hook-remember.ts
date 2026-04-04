@@ -141,6 +141,8 @@ async function processOp(
   cwd:         string,
   threshold:   number,
 ): Promise<void> {
+  // Defensive: caller pre-filters to directOps (confidence >= threshold),
+  // so this guard is not normally reachable.
   if (op.confidence < threshold) return;
 
   const now    = nowIso();
@@ -246,6 +248,9 @@ export async function runHookRemember(): Promise<void> {
       } else if (sessionType === "headless") {
         // Log ops that didn't meet the headless threshold.
         logHeadlessDecision(cwd, op, /* written= */ false);
+      } else {
+        // Non-headless ops below VALIDATION_MIN_CONFIDENCE: silently discard.
+        // (Too low confidence to bother Claude with validation.)
       }
     }
 
