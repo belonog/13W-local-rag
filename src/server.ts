@@ -29,6 +29,7 @@ import { getSymbolTool }        from "./tools/get_symbol.js";
 import { findUsagesTool }       from "./tools/find_usages.js";
 import { requestValidationTool } from "./tools/request-validation.js";
 import type { Status }           from "./types.js";
+import { buildProjectProfile } from "./archivist.js";
 
 // ── Tool definitions (JSON Schema) ──────────────────────────────────────────
 
@@ -475,6 +476,11 @@ process.on("unhandledRejection", (reason: unknown) => {
 // ── Startup ──────────────────────────────────────────────────────────────────
 
 await ensureCollections();
+
+// Build project profile for the archivist (non-blocking — failure is logged, not fatal).
+buildProjectProfile().catch((err: unknown) => {
+  process.stderr.write(`[archivist] profile build failed: ${String(err)}\n`);
+});
 
 // Populate MCP instructions with a live snapshot of project state.
 // Runs once at connection time so Claude immediately knows the memory state.
