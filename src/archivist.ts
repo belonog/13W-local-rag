@@ -53,7 +53,7 @@ const SEARCH_MEMORY_TOOL: ToolDef = {
       },
       status: {
         type: "string",
-        enum: ["in_progress", "resolved", "open_question", "hypothesis", ""],
+        enum: ["in_progress", "resolved", "open_question", "hypothesis"],
         description: "Filter by entry status. Omit for no filter.",
       },
       tags: {
