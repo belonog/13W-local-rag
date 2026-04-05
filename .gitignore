@@ -8,3 +8,4 @@ src/dashboard-ui/.angular/
 types/
 .mcp.json
 .memory.json
+.worktrees/
