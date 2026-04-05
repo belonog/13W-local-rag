@@ -14,6 +14,7 @@ import { qd, colName } from "./qdrant.js";
 import { embedOne } from "./embedder.js";
 import { callLlmSimple, callLlmWithTools, type ToolDef } from "./llm-client.js";
 import { debugLog } from "./util.js";
+import { createHash } from "node:crypto";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -116,8 +117,7 @@ async function _loadProfile(): Promise<ProjectProfile | null> {
 }
 
 /** Stable UUID-shaped ID for this project's profile point (same projectId → same ID). */
-async function _profilePointId(): Promise<string> {
-  const { createHash } = await import("node:crypto");
+function _profilePointId(): string {
   const hash = createHash("sha256").update(`profile:${cfg.projectId}`).digest("hex");
   // Format as UUID v4-shaped string (Qdrant requires UUID format)
   return `${hash.slice(0,8)}-${hash.slice(8,12)}-4${hash.slice(13,16)}-${hash.slice(16,20)}-${hash.slice(20,32)}`;
@@ -194,7 +194,7 @@ export async function buildProjectProfile(): Promise<void> {
   };
 
   // Deterministic ID so upsert overwrites the existing profile point.
-  const profileId = await _profilePointId();
+  const profileId = _profilePointId();
   const vector = await embedOne(topTopics.join(" "));
   await qd.upsert(colName("memory"), {
     points: [{
@@ -264,13 +264,14 @@ async function _executeSearchMemory(args: Record<string, unknown>): Promise<stri
   const allHits: QHit[] = [];
 
   await Promise.all(collections.map(async col => {
-    const filter: Record<string, unknown> = { must: mustFilter };
+    const effectiveMust: unknown[] = [...mustFilter];
     if (tags.length > 0) {
-      filter["should"] = tags.map(t => ({ key: "tags", match: { value: t } }));
+      // Nested should inside must: "must match at least one tag"
+      effectiveMust.push({ should: tags.map(t => ({ key: "tags", match: { value: t } })) });
     }
     const hits = await qd.search(col, {
       vector,
-      filter: filter as Parameters<typeof qd.search>[1]["filter"],
+      filter: { must: effectiveMust } as Parameters<typeof qd.search>[1]["filter"],
       limit,
       with_payload:    true,
       score_threshold: 0.3,
