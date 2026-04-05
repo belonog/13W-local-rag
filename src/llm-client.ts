@@ -90,7 +90,7 @@ async function _callAnthropicSimple(prompt: string, model: string, apiKey: strin
   });
   if (!resp.ok) { const b = await resp.text().catch(() => ""); throw new Error(`Anthropic simple: ${resp.status} — ${b}`); }
   const data = await resp.json() as { content: { type: string; text: string }[] };
-  return data.content[0]!.text;
+  return data.content[0]?.text ?? "";
 }
 
 async function _callGeminiSimple(prompt: string, model: string, apiKey: string, baseUrl: string): Promise<string> {
