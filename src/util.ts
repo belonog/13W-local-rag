@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { appendFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import type { StoreMemoryParams } from "./types.js";
 import type { RouterOp } from "./router.js";
 import { cfg } from "./config.js";
@@ -101,6 +102,66 @@ export function buildValidationRequests(ops: RouterOp[]): string | null {
 
   return lines.join("\n");
 }
+
+// ── Transcript helpers ────────────────────────────────────────────────────────
+
+type JsonLine = Record<string, unknown>;
+
+export function safeParseLines(raw: string): JsonLine[] {
+  return raw
+    .split("\n")
+    .filter(Boolean)
+    .flatMap((line) => {
+      try { return [JSON.parse(line) as JsonLine]; }
+      catch { return []; }
+    });
+}
+
+function extractLineText(line: JsonLine): string {
+  const msg = line["message"] as JsonLine | undefined;
+  if (!msg) return "";
+  const role = String(msg["role"] ?? "");
+  if (role !== "user" && role !== "assistant") return "";
+  const content = msg["content"];
+  if (typeof content === "string") {
+    return content.trim() ? `${role}: ${content.trim()}` : "";
+  }
+  if (Array.isArray(content)) {
+    const text = (content as JsonLine[])
+      .filter((b) => b["type"] === "text")
+      .map((b) => String(b["text"] ?? "").trim())
+      .filter(Boolean)
+      .join(" ");
+    return text ? `${role}: ${text}` : "";
+  }
+  return "";
+}
+
+/**
+ * Read up to `maxChars` of recent conversation from `transcriptPath`.
+ * Returns empty string if the file is missing or unreadable.
+ */
+export function buildTranscriptContext(transcriptPath: string, maxChars: number): string {
+  if (!transcriptPath || !existsSync(transcriptPath)) return "";
+  try {
+    const raw   = readFileSync(transcriptPath, "utf8");
+    const lines = safeParseLines(raw);
+    const segments: string[] = [];
+    let total = 0;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const text = extractLineText(lines[i]!);
+      if (!text) continue;
+      if (total + text.length > maxChars) break;
+      segments.unshift(text);
+      total += text.length + 1;
+    }
+    return segments.join("\n");
+  } catch {
+    return "";
+  }
+}
+
+// ── Logging ───────────────────────────────────────────────────────────────────
 
 /**
  * Append one verbose log line to cfg.debugLogPath when debug logging is enabled.
