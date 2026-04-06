@@ -30,7 +30,7 @@ interface ToolStats {
 interface RequestEntry {
   ts:       number;
   tool:     string;
-  source:   "mcp" | "playground" | "watcher";
+  source:   "mcp" | "playground" | "watcher" | "hook";
   bytesIn:  number;
   bytesOut: number;
   ms:       number;
@@ -104,7 +104,7 @@ function statsSnapshot(): Record<string, unknown> {
   return out;
 }
 
-export function record(tool: string, source: "mcp" | "playground", bytesIn: number, bytesOut: number, ms: number, ok: boolean, error?: string): void {
+export function record(tool: string, source: "mcp" | "playground" | "hook", bytesIn: number, bytesOut: number, ms: number, ok: boolean, error?: string): void {
   const prev = toolStats.get(tool) ?? { calls: 0, bytesIn: 0, bytesOut: 0, totalMs: 0, errors: 0 };
   toolStats.set(tool, {
     calls:    prev.calls    + 1,
@@ -433,6 +433,20 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
 
     results.sort((a, b) => b.score - a.score);
     return { results: results.slice(0, 5) };
+  });
+
+  fastify.post("/api/projects", async (req, reply) => {
+    const { upsertProjectConfig } = await import("../server-config.js");
+    const { qd } = await import("../qdrant.js");
+    await upsertProjectConfig(qd, req.body as import("../server-config.js").ProjectConfig);
+    return reply.code(201).send({ ok: true });
+  });
+
+  fastify.get("/api/projects", async (_req, reply) => {
+    const { listProjectConfigs } = await import("../server-config.js");
+    const { qd } = await import("../qdrant.js");
+    const projects = await listProjectConfigs(qd);
+    return reply.send({ projects });
   });
 }
 
