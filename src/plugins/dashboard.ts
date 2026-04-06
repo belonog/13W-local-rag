@@ -448,6 +448,43 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     const projects = await listProjectConfigs(qd);
     return reply.send({ projects });
   });
+
+  // GET /api/config/server — return current server config
+  fastify.get("/api/config/server", async () => {
+    const { loadServerConfig } = await import("../server-config.js");
+    const { qd } = await import("../qdrant.js");
+    return loadServerConfig(qd);
+  });
+
+  // PUT /api/config/server — update server config
+  fastify.put("/api/config/server", async (req, reply) => {
+    const { loadServerConfig, saveServerConfig, mergeServerConfig } = await import("../server-config.js");
+    const { applyServerConfig } = await import("../config.js");
+    const { qd } = await import("../qdrant.js");
+    const current = await loadServerConfig(qd);
+    const body = req.body as Record<string, unknown>;
+    const updated = mergeServerConfig({ ...current, ...body });
+    await saveServerConfig(qd, updated);
+    applyServerConfig(updated);
+    return reply.send({ ok: true });
+  });
+
+  // GET /api/projects/:projectId
+  fastify.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async (req) => {
+    const { loadProjectConfig } = await import("../server-config.js");
+    const { qd } = await import("../qdrant.js");
+    return loadProjectConfig(qd, req.params.projectId);
+  });
+
+  // PUT /api/projects/:projectId
+  fastify.put<{ Params: { projectId: string } }>("/api/projects/:projectId", async (req, reply) => {
+    const { loadProjectConfig, upsertProjectConfig, mergeProjectConfig } = await import("../server-config.js");
+    const { qd } = await import("../qdrant.js");
+    const body = req.body as Record<string, unknown>;
+    const current = await loadProjectConfig(qd, req.params.projectId) ?? mergeProjectConfig({ project_id: req.params.projectId });
+    await upsertProjectConfig(qd, mergeProjectConfig({ ...current, ...body, project_id: req.params.projectId }));
+    return reply.send({ ok: true });
+  });
 }
 
 // ── Legacy startDashboard (kept for backward compat during transition) ────────

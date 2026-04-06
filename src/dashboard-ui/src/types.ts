@@ -79,3 +79,36 @@ export interface InitData {
   schemas:    ToolSchemaDef[];
   serverInfo: ServerInfo;
 }
+
+export interface LlmProviderConfig {
+  provider: string;
+  model:    string;
+  api_key:  string;
+  url:      string;
+  fallback: LlmProviderConfig | null;
+}
+
+export interface EmbedConfig {
+  provider: string;
+  model:    string;
+  api_key:  string;
+  dim:      number;
+  url:      string;
+}
+
+export interface ServerConfigData {
+  embed:             EmbedConfig;
+  llm:               LlmProviderConfig;
+  router:            LlmProviderConfig;
+  collection_prefix: string;
+  port:              number;
+}
+
+export interface ProjectConfigData {
+  project_id:    string;
+  display_name:  string;
+  agent_id:      string;
+  project_root:  string;
+  include_paths: string[];
+  indexer_state: "running" | "paused" | "stopped";
+}
