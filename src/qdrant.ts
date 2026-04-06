@@ -1,7 +1,18 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
-import { cfg } from "./config.js";
 
-export const qd = new QdrantClient({ url: cfg.qdrantUrl, timeout: 30_000 });
+// Initialized lazily via initQdrant() during server bootstrap.
+// Do NOT use qd before initQdrant() is called.
+export let qd: QdrantClient = null as unknown as QdrantClient;
+
+export function initQdrant(url: string, apiKey?: string): void {
+  qd = new QdrantClient({ url, apiKey: apiKey || undefined, timeout: 30_000 });
+}
+
+let _collectionPrefix = "";
+export function setCollectionPrefix(prefix: string): void { _collectionPrefix = prefix; }
+
+let _embedDim = 384;
+export function setEmbedDim(dim: number): void { _embedDim = dim; }
 
 export const COLLECTIONS = [
   "memory_episodic",
@@ -14,7 +25,7 @@ export const COLLECTIONS = [
 
 /** Prepend the configured collection prefix (if any) to a base collection name. */
 export function colName(base: string): string {
-  return cfg.collectionPrefix ? `${cfg.collectionPrefix}_${base}` : base;
+  return _collectionPrefix ? `${_collectionPrefix}_${base}` : base;
 }
 
 const MEMORY_COLLECTIONS = ["memory_episodic", "memory_semantic", "memory_procedural"] as const;
@@ -65,8 +76,8 @@ async function ensureCodeChunks(): Promise<void> {
 
   await qd.createCollection(col, {
     vectors: {
-      [CODE_VECTORS.code]:        { size: cfg.embedDim, distance: "Cosine" },
-      [CODE_VECTORS.description]: { size: cfg.embedDim, distance: "Cosine" },
+      [CODE_VECTORS.code]:        { size: _embedDim, distance: "Cosine" },
+      [CODE_VECTORS.description]: { size: _embedDim, distance: "Cosine" },
     },
   });
 
@@ -98,7 +109,7 @@ async function ensureNewMemoryCollections(existing: Set<string>): Promise<void> 
   for (const name of NEW_MEMORY_COLLECTIONS) {
     const col = colName(name);
     if (existing.has(col)) continue;
-    await qd.createCollection(col, { vectors: { size: cfg.embedDim, distance: "Cosine" } });
+    await qd.createCollection(col, { vectors: { size: _embedDim, distance: "Cosine" } });
     for (const field of NEW_MEMORY_INDEXES) {
       await qd.createPayloadIndex(col, { field_name: field, field_schema: "keyword", wait: true });
     }
@@ -115,7 +126,7 @@ export async function ensureCollections(): Promise<void> {
     if (existing.has(col)) continue;
 
     await qd.createCollection(col, {
-      vectors: { size: cfg.embedDim, distance: "Cosine" },
+      vectors: { size: _embedDim, distance: "Cosine" },
     });
 
     for (const field of ["project_id", "agent_id", "scope", "content_hash"]) {
