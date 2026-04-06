@@ -36,6 +36,8 @@
     "start": "node dist/bin.js serve",
     "index": "node dist/bin.js index",
     "watch": "node dist/bin.js watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "bench:build": "tsc -p tsconfig.bench.json",
     "bench": "node dist/scripts/benchmark.js",
     "bench:fast": "node dist/scripts/benchmark.js --no-descriptions",
@@ -44,7 +46,7 @@
   },
   "dependencies": {
     "@fastify/static": "^9.0.0",
-"@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@qdrant/js-client-rest": "^1.17.0",
     "chokidar": "^5.0.0",
     "fastify": "^5.8.4",
@@ -60,6 +62,8 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.5.0",
-    "typescript": "^6.0.2"
+    "@vitest/coverage-v8": "^4.1.2",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
   }
 }
