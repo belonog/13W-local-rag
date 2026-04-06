@@ -1,15 +1,6 @@
-import { Component, OnInit, signal } from "@angular/core";
-
-interface MemoryEntry {
-  id:           string;
-  text:         string;
-  status:       string;
-  confidence:   number;
-  session_id:   string;
-  session_type: string;
-  updated_at:   string;
-  created_at:   string;
-}
+import { Component, OnInit, signal, effect, inject } from "@angular/core";
+import { SseService } from "../services/sse.service";
+import type { MemoryEntry, OverviewData } from "../../types";
 
 interface SearchResult {
   id:           string;
@@ -28,18 +19,14 @@ interface SessionEntry {
   latest:        string;
 }
 
-interface OverviewData {
-  statusCounts: Record<string, number>;
-  recent:       MemoryEntry[];
-  sessions:     SessionEntry[];
-}
-
 @Component({
   selector:    "app-memory",
   standalone:  true,
   templateUrl: "./memory.component.html",
 })
 export class MemoryComponent implements OnInit {
+  private readonly sse = inject(SseService);
+
   readonly overview        = signal<OverviewData | null>(null);
   readonly searchQuery     = signal("");
   readonly searchResults   = signal<SearchResult[]>([]);
@@ -49,10 +36,25 @@ export class MemoryComponent implements OnInit {
   readonly filteredEntries  = signal<MemoryEntry[]>([]);
   readonly filterLoading    = signal(false);
 
+  constructor() {
+    effect(() => {
+      const live = this.sse.memory();
+      if (!live) return;
+      this.overview.set(live);
+      this.loading.set(false);
+      if (this.selectedStatuses().size > 0) {
+        this._fetchByStatus(this.selectedStatuses());
+      }
+    });
+  }
+
   ngOnInit(): void {
     void fetch("/api/memory/overview")
       .then(r => r.json() as Promise<OverviewData>)
-      .then(data => { this.overview.set(data); this.loading.set(false); })
+      .then(data => {
+        if (!this.overview()) this.overview.set(data);
+        this.loading.set(false);
+      })
       .catch(() => { this.loading.set(false); });
   }
 

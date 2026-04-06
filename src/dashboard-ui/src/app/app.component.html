@@ -99,10 +99,10 @@
       (click)="tab.set('playground')">Playground</button>
     <button
       class="px-4 py-1.5 text-[0.82rem] font-mono border-b-2 transition-colors duration-100 cursor-pointer bg-transparent"
-      [class]="tab() === 'settings'
+      [class]="tab() === 'memory'
         ? 'border-(--color-indigo) text-(--color-indigo)'
         : 'border-transparent text-(--color-muted) hover:text-(--color-text)'"
-      (click)="tab.set('settings')">Settings</button>
+      (click)="tab.set('memory')">Memory</button>
   </div>
 
   <!-- Tab content -->
@@ -139,8 +139,8 @@
       <app-playground [schemas]="init.schemas" />
     }
 
-    @if (tab() === 'settings') {
-      <app-settings />
+    @if (tab() === 'memory') {
+      <app-memory />
     }
 
   </div>

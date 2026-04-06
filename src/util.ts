@@ -6,6 +6,7 @@ import type { RouterOp } from "./router.js";
 import { cfg } from "./config.js";
 import { qd, colName } from "./qdrant.js";
 import { embedOne } from "./embedder.js";
+import { broadcastMemoryUpdate } from "./dashboard.js";
 
 export function colForType(memoryType: string): string {
   return colName(`memory_${memoryType}`);
@@ -77,6 +78,8 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
     ],
   });
 
+  void broadcastMemoryUpdate();
+
   return `stored [${memoryType}]: ${memId} (importance=${importance})`;
 }
 
@@ -105,10 +108,22 @@ export function buildValidationRequests(ops: RouterOp[]): string | null {
 
 // ── Transcript helpers ────────────────────────────────────────────────────────
 
-type JsonLine = Record<string, unknown>;
+export type JsonLine = Record<string, unknown>;
 
 export function safeParseLines(raw: string): JsonLine[] {
-  return raw
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      if (Array.isArray(parsed["messages"])) {
+        return parsed["messages"] as JsonLine[];
+      }
+    } catch {
+      // Fall through to line-by-line parsing
+    }
+  }
+
+  return trimmed
     .split("\n")
     .filter(Boolean)
     .flatMap((line) => {
@@ -117,24 +132,74 @@ export function safeParseLines(raw: string): JsonLine[] {
     });
 }
 
-function extractLineText(line: JsonLine): string {
-  const msg = line["message"] as JsonLine | undefined;
-  if (!msg) return "";
-  const role = String(msg["role"] ?? "");
+export function extractLineText(line: JsonLine): string {
+  // Case 1: claude-code wrapped in "message" key
+  let msg = line["message"] as JsonLine | undefined;
+  let role: string;
+
+  if (msg) {
+    role = String(msg["role"] ?? "");
+  } else {
+    // Case 2: gemini-cli or raw message object
+    msg  = line;
+    role = String(msg["role"] ?? msg["type"] ?? "");
+  }
+
+  // Handle special gemini-cli types that aren't 'user'/'assistant' but carry info
+  if (role === "tool_use" || role === "tool_call") {
+    const name = String(msg["name"] ?? (msg["functionCall"] as JsonLine)?.["name"] ?? "tool");
+    return `[Tool Use: ${name}]`;
+  }
+  if (role === "tool_result" || role === "tool_response") {
+    const content = msg["content"] ?? (msg["functionResponse"] as JsonLine)?.["response"];
+    const text = typeof content === "string" ? content : JSON.stringify(content);
+    return `[Tool Result: ${text.slice(0, 200)}${text.length > 200 ? "..." : ""}]`;
+  }
+
   if (role !== "user" && role !== "assistant") return "";
+
   const content = msg["content"];
   if (typeof content === "string") {
     return content.trim() ? `${role}: ${content.trim()}` : "";
   }
   if (Array.isArray(content)) {
-    const text = (content as JsonLine[])
-      .filter((b) => b["type"] === "text")
-      .map((b) => String(b["text"] ?? "").trim())
-      .filter(Boolean)
-      .join(" ");
+    const segments = (content as JsonLine[])
+      .map((b) => {
+        if (typeof b === "string") return b;
+        // gemini-cli: { "text": "..." }
+        if (typeof b["text"] === "string") return b["text"];
+        // tool calls inside content blocks
+        if (b["type"] === "tool_use") return `[Tool Use: ${b["name"]}]`;
+        if (b["type"] === "tool_result") return `[Tool Result: ${String(b["content"]).slice(0, 100)}...]`;
+        // claude-code: { "type": "text", "text": "..." }
+        if (b["type"] === "text" && typeof b["text"] === "string") return b["text"];
+        return "";
+      })
+      .map((s) => s.trim())
+      .filter(Boolean);
+    
+    const text = segments.join(" ");
     return text ? `${role}: ${text}` : "";
   }
   return "";
+}
+
+/**
+ * Build a transcript window of up to `maxChars` from parsed lines.
+ */
+export function buildWindow(lines: JsonLine[], maxChars: number): string {
+  const segments: string[] = [];
+  let total = 0;
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const text = extractLineText(lines[i]!);
+    if (!text) continue;
+    if (total + text.length > maxChars) break;
+    segments.unshift(text);
+    total += text.length + 1;
+  }
+
+  return segments.join("\n");
 }
 
 /**
@@ -146,16 +211,7 @@ export function buildTranscriptContext(transcriptPath: string, maxChars: number)
   try {
     const raw   = readFileSync(transcriptPath, "utf8");
     const lines = safeParseLines(raw);
-    const segments: string[] = [];
-    let total = 0;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const text = extractLineText(lines[i]!);
-      if (!text) continue;
-      if (total + text.length > maxChars) break;
-      segments.unshift(text);
-      total += text.length + 1;
-    }
-    return segments.join("\n");
+    return buildWindow(lines, maxChars);
   } catch {
     return "";
   }

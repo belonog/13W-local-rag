@@ -202,23 +202,22 @@ export async function buildProjectProfile(): Promise<void> {
 // ── System prompt ─────────────────────────────────────────────────────────────
 
 function _buildSystemPrompt(profile: ProjectProfile | null): string {
-  if (!profile) {
-    return (
-      "You are a memory archivist. " +
-      "Use the search_memory tool to find relevant context for the user's query. " +
-      "If nothing relevant is found, return an empty string."
-    );
-  }
-  return [
-    `You are a memory archivist for project "${profile.projectId}".`,
+  const profileCtx = profile ? [
     `Key topics: ${profile.topTopics.join(", ")}.`,
     `Common tags: ${profile.topTags.slice(0, 15).join(", ")}.`,
     `Collections: ${Object.entries(profile.collectionStats).map(([c, n]) => `${c}(${n})`).join(", ")}.`,
+  ].join("\n") : "";
+
+  return [
+    `You are a memory archivist for project "${profile?.projectId ?? "unknown"}".`,
+    profileCtx,
     "",
-    "Use search_memory to find context relevant to the user's query.",
-    "Reformulate queries in English for best semantic match.",
-    "Return a concise summary of relevant findings.",
-    "If nothing relevant is found, return an empty string.",
+    "ROLE:",
+    "1. CONTEXT RETRIEVAL: Focus on the CURRENT MESSAGE at the bottom. Search for information relevant to it.",
+    "2. ANSWER DETECTION: If the current message is an answer to a previous question from the assistant, search for that question or related issues to find context.",
+    "3. RESOLUTION HINTS: If the current message addresses an 'open_question' or 'hypothesis', mention it so the assistant can resolve it.",
+    "",
+    "Use search_memory to find context. Be specific in your query. Return a concise summary of findings (markdown). If nothing relevant is found, return an empty string.",
   ].join("\n");
 }
 
@@ -273,7 +272,16 @@ async function _executeSearchMemory(args: Record<string, unknown>): Promise<stri
   allHits.sort((a, b) => b.score - a.score);
   const top = allHits.slice(0, limit);
 
-  debugLog("archivist", `search results=${top.length}`);
+  if (top.length > 0) {
+    const summary = top.map(h => {
+      const p = (h.payload ?? {}) as Record<string, unknown>;
+      const text = String(p["text"] ?? p["content"] ?? "").replace(/\n/g, " ").slice(0, 60);
+      return `[${h.score.toFixed(2)}] ${text}`;
+    }).join(" | ");
+    debugLog("archivist", `search results=${top.length} summary="${summary}"`);
+  } else {
+    debugLog("archivist", "search results=0");
+  }
 
   if (top.length === 0) return JSON.stringify({ results: [] });
 
@@ -298,7 +306,9 @@ async function _executeSearchMemory(args: Record<string, unknown>): Promise<stri
  * Never throws.
  */
 export async function runArchivist(prompt: string): Promise<string> {
-  debugLog("archivist", `prompt="${prompt.slice(0, 100)}"`);
+  const currentMsgMatch = prompt.match(/\n\nCurrent message: (.*)$/s);
+  const currentMsg = currentMsgMatch ? currentMsgMatch[1] : prompt;
+  debugLog("archivist", `prompt_preview="${currentMsg.slice(0, 150).replace(/\n/g, " ")}"`);
 
   const profile = await _loadProfile().catch(() => null);
   debugLog("archivist", `profile=${profile ? "loaded" : "missing"}`);
@@ -314,7 +324,8 @@ export async function runArchivist(prompt: string): Promise<string> {
       (_name, args) => _executeSearchMemory(args),
       spec,
     );
-    debugLog("archivist", `response len=${result.length}`);
+    const resultLog = result.trim().replace(/\n/g, " ").slice(0, 150);
+    debugLog("archivist", `response len=${result.length} content="${resultLog}${result.length > 150 ? "..." : ""}"`);
     return result;
   } catch (err: unknown) {
     process.stderr.write(`[archivist] failed: ${String(err)}\n`);

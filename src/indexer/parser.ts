@@ -23,7 +23,8 @@ interface LanguageDef {
 
 type ExtEntry =
   | { kind: "treesitter"; wasmKey: string; defKey: string }
-  | { kind: "data";       parser:  "yaml" | "toml" | "json" };
+  | { kind: "data";       parser:  "yaml" | "toml" | "json" }
+  | { kind: "text";       parser:  "markdown" | "plaintext" };
 
 const EXT_MAP: Record<string, ExtEntry> = {
   // Existing — unchanged behaviour
@@ -41,6 +42,10 @@ const EXT_MAP: Record<string, ExtEntry> = {
   ".yml":  { kind: "data", parser: "yaml" },
   ".json": { kind: "data", parser: "json" },
   ".toml": { kind: "data", parser: "toml" },
+  // Text formats
+  ".md":   { kind: "text", parser: "markdown" },
+  ".mdx":  { kind: "text", parser: "markdown" },
+  ".txt":  { kind: "text", parser: "plaintext" },
 };
 
 export const EXTENSIONS = new Set(Object.keys(EXT_MAP));
@@ -643,6 +648,162 @@ function parseTomlFile(filePath: string, source: string): CodeChunk[] {
   return chunks;
 }
 
+// ── text format parsers ───────────────────────────────────────────────────────
+
+/** Split large text into overlapping chunks at paragraph/line boundaries. */
+function splitTextIntoChunks(text: string, maxChars: number, overlap: number): string[] {
+  if (text.length <= maxChars) return [text];
+
+  const chunks: string[] = [];
+  let start = 0;
+
+  while (start < text.length) {
+    let end = start + maxChars;
+
+    if (end < text.length) {
+      // Prefer paragraph break near the end of the window
+      const paraBreak = text.lastIndexOf("\n\n", end);
+      if (paraBreak > start + maxChars / 2) {
+        end = paraBreak;
+      } else {
+        // Fall back to any line break
+        const lineBreak = text.lastIndexOf("\n", end);
+        if (lineBreak > start + maxChars / 2) end = lineBreak;
+      }
+    } else {
+      end = text.length;
+    }
+
+    chunks.push(text.slice(start, end).trimEnd());
+    if (end >= text.length) break;
+    start = Math.max(start + 1, end - overlap);
+  }
+
+  return chunks;
+}
+
+function parseMarkdown(filePath: string, source: string): CodeChunk[] {
+  const stem  = basename(filePath, extname(filePath));
+  const lines = source.split("\n");
+
+  // Track heading hierarchy for breadcrumb context
+  const headingStack: Array<{ level: number; title: string }> = [];
+
+  type Section = {
+    level:      number;
+    title:      string;
+    breadcrumb: string;
+    startLine:  number;
+    endLine:    number;
+    content:    string;
+  };
+
+  const sections: Section[] = [];
+  let sectionLines: string[] = [];
+  let sectionTitle  = stem;
+  let sectionLevel  = 0;
+  let sectionStart  = 1;
+  let inSection     = false;
+
+  const flushSection = (endLine: number) => {
+    const content = sectionLines.join("\n").trimEnd();
+    if (!content || (!inSection && !content.trim())) return;
+    // Breadcrumb is the full ancestor path: "# H1 > ## H2 > ### H3"
+    const breadcrumb = headingStack
+      .map(h => "#".repeat(h.level) + " " + h.title)
+      .join(" > ");
+    sections.push({ level: sectionLevel, title: sectionTitle, breadcrumb, startLine: sectionStart, endLine, content });
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const m    = line.match(/^(#{1,3})\s+(.+)$/);
+
+    if (m) {
+      flushSection(i); // flush previous section before updating stack
+
+      const level = m[1]!.length;
+      const title = m[2]!.trim();
+
+      // Maintain ancestor stack: pop headings of same or deeper level
+      while (headingStack.length > 0 && headingStack[headingStack.length - 1]!.level >= level) {
+        headingStack.pop();
+      }
+      headingStack.push({ level, title });
+
+      sectionLevel = level;
+      sectionTitle = title;
+      sectionStart = i + 1;
+      sectionLines = [line];
+      inSection    = true;
+    } else {
+      sectionLines.push(line);
+    }
+  }
+  flushSection(lines.length);
+
+  // No headings found → fall back to plain-text chunking
+  if (sections.length === 0) return parsePlainText(filePath, source);
+
+  const OVERLAP = 200;
+  const chunks: CodeChunk[] = [];
+
+  for (const sec of sections) {
+    const subChunks = splitTextIntoChunks(sec.content, MAX_CHUNK_CHARS, OVERLAP);
+    const total     = subChunks.length;
+
+    subChunks.forEach((sub, idx) => {
+      chunks.push({
+        content:   sub,
+        filePath,
+        chunkType: "section",
+        name:      total > 1 ? `${sec.title} [${idx + 1}/${total}]` : sec.title,
+        signature: sec.breadcrumb || sec.title,
+        startLine: sec.startLine,
+        endLine:   sec.endLine,
+        language:  "markdown",
+        jsdoc:     "",
+      });
+    });
+  }
+
+  return chunks;
+}
+
+function parsePlainText(filePath: string, source: string): CodeChunk[] {
+  const stem     = basename(filePath, extname(filePath));
+  const allLines = source.split("\n");
+
+  if (source.length <= MAX_CHUNK_CHARS) {
+    return [{
+      content:   source.trimEnd(),
+      filePath,
+      chunkType: "document",
+      name:      stem,
+      signature: "",
+      startLine: 1,
+      endLine:   allLines.length,
+      language:  "text",
+      jsdoc:     "",
+    }];
+  }
+
+  const subChunks = splitTextIntoChunks(source, MAX_CHUNK_CHARS, 200);
+  const total     = subChunks.length;
+
+  return subChunks.map((sub, idx) => ({
+    content:   sub,
+    filePath,
+    chunkType: "document",
+    name:      total > 1 ? `${stem} [${idx + 1}/${total}]` : stem,
+    signature: "",
+    startLine: 1,
+    endLine:   allLines.length,
+    language:  "text",
+    jsdoc:     "",
+  }));
+}
+
 // ── public API ────────────────────────────────────────────────────────────────
 
 export async function parseFile(filePath: string, source: string): Promise<CodeChunk[]> {
@@ -654,6 +815,12 @@ export async function parseFile(filePath: string, source: string): Promise<CodeC
     if (entry.parser === "yaml") return parseYaml(filePath, source);
     if (entry.parser === "json") return parseJsonFile(filePath, source);
     if (entry.parser === "toml") return parseTomlFile(filePath, source);
+    return [];
+  }
+
+  if (entry.kind === "text") {
+    if (entry.parser === "markdown")  return parseMarkdown(filePath, source);
+    if (entry.parser === "plaintext") return parsePlainText(filePath, source);
     return [];
   }
 
@@ -687,7 +854,7 @@ export async function parseFile(filePath: string, source: string): Promise<CodeC
 export async function extractFileImports(filePath: string, source: string): Promise<string[]> {
   const ext   = extname(filePath).toLowerCase();
   const entry = EXT_MAP[ext];
-  if (!entry || entry.kind === "data") return [];
+  if (!entry || entry.kind === "data" || entry.kind === "text") return [];
 
   const parser = await getParser(entry.wasmKey);
   const def    = LANG_DEFS[entry.defKey];

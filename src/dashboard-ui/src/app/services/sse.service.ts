@@ -1,5 +1,5 @@
 import { Injectable, OnDestroy, signal } from "@angular/core";
-import type { InitData, ProcessError, ReindexProgress, RequestEntry, ServerInfo, ToolStats } from "../../types";
+import type { InitData, ProcessError, ReindexProgress, RequestEntry, ServerInfo, ToolStats, OverviewData } from "../../types";
 
 const LOG_MAX = 500;
 
@@ -11,6 +11,7 @@ export class SseService implements OnDestroy {
   readonly errors     = signal<ProcessError[]>([]);
   readonly reindex    = signal<ReindexProgress | null>(null);
   readonly serverInfo = signal<ServerInfo | null>(null);
+  readonly memory     = signal<OverviewData | null>(null);
 
   private es: EventSource | null = null;
 
@@ -26,6 +27,7 @@ export class SseService implements OnDestroy {
         | { type: "entry";    stats: Record<string, ToolStats>; entry: RequestEntry }
         | { type: "reindex";  progress: ReindexProgress }
         | { type: "branch";   branch: string }
+        | { type: "memory";   overview: OverviewData }
         | { type: "error";    message: string; stack: string; ts: number }
         | { type: "shutdown" };
       if (msg.type === "init") {
@@ -46,6 +48,9 @@ export class SseService implements OnDestroy {
       }
       if (msg.type === "branch") {
         this.serverInfo.update(prev => prev ? { ...prev, branch: msg.branch } : prev);
+      }
+      if (msg.type === "memory") {
+        this.memory.set(msg.overview);
       }
       if (msg.type === "error") {
         this.errors.update(prev => [{ message: msg.message, stack: msg.stack, ts: msg.ts }, ...prev]);

@@ -9,26 +9,15 @@ export interface ToolStats {
 }
 
 export interface RequestEntry {
-  ts:        number;
-  tool:      string;
-  source:    "mcp" | "playground" | "watcher" | "hook";
-  bytesIn:   number;
-  bytesOut:  number;
-  ms:        number;
-  ok:        boolean;
-  chunks?:   number;
-  error?:    string;
-  // hook-only
-  hook_type?:  "recall" | "remember";
-  session_id?: string;
-  project_id?: string;
-  agent_id?:   string;
-  found?:      number;
-  summary?:    string;
-  written?:    number;
-  validated?:  number;
-  discarded?:  number;
-  facts?:      string[];
+  ts:       number;
+  tool:     string;
+  source:   "mcp" | "playground" | "watcher";
+  bytesIn:  number;
+  bytesOut: number;
+  ms:       number;
+  ok:       boolean;
+  chunks?:  number;
+  error?:   string;
 }
 
 export interface PropSchema {
@@ -73,42 +62,33 @@ export interface ReindexProgress {
   chunks: number;
 }
 
+export interface MemoryEntry {
+  id:           string;
+  text:         string;
+  status:       string;
+  confidence:   number;
+  session_id:   string;
+  session_type: string;
+  updated_at:   string;
+  created_at:   string;
+}
+
+export interface SessionEntry {
+  session_id:    string;
+  count:         number;
+  dominant_type: string;
+  latest:        string;
+}
+
+export interface OverviewData {
+  statusCounts: Record<string, number>;
+  recent:       MemoryEntry[];
+  sessions:     SessionEntry[];
+}
+
 export interface InitData {
   stats:      Record<string, ToolStats>;
   log:        RequestEntry[];
   schemas:    ToolSchemaDef[];
   serverInfo: ServerInfo;
-}
-
-export interface LlmProviderConfig {
-  provider: string;
-  model:    string;
-  api_key:  string;
-  url:      string;
-  fallback: LlmProviderConfig | null;
-}
-
-export interface EmbedConfig {
-  provider: string;
-  model:    string;
-  api_key:  string;
-  dim:      number;
-  url:      string;
-}
-
-export interface ServerConfigData {
-  embed:             EmbedConfig;
-  llm:               LlmProviderConfig;
-  router:            LlmProviderConfig;
-  collection_prefix: string;
-  port:              number;
-}
-
-export interface ProjectConfigData {
-  project_id:    string;
-  display_name:  string;
-  agent_id:      string;
-  project_root:  string;
-  include_paths: string[];
-  indexer_state: "running" | "paused" | "stopped";
 }
