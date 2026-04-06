@@ -1,42 +1,12 @@
-import { parseArgs } from "node:util";
-import { readFileSync, existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import type { ServerConfig } from "./server-config.js";
+import { getProjectId, getAgentId } from "./request-context.js";
+import { setCollectionPrefix, setEmbedDim } from "./qdrant.js";
 
-// pnpm passes its own "--" separator into process.argv when using
-// `pnpm <script> -- <args>`.  Strip it so that named options that follow
-// are not silently treated as positionals by parseArgs.
-const rawArgs = process.argv.slice(2).filter((a) => a !== "--");
+// Re-export for backward compat — tools can import these from config.js
+export { getProjectId, getAgentId };
 
-const { values } = parseArgs({
-  args: rawArgs,
-  options: {
-    "config":                { type: "string",  short: "c" },
-    "qdrant-url":            { type: "string" },
-    "ollama-url":            { type: "string" },
-    "embed-model":           { type: "string" },
-    "embed-dim":             { type: "string" },
-    "agent-id":              { type: "string" },
-    "project-id":            { type: "string" },
-    "llm-model":             { type: "string" },
-    "project-root":          { type: "string" },
-    "generate-descriptions": { type: "boolean" },
-    "embed-provider":        { type: "string" },
-    "embed-api-key":         { type: "string" },
-    "embed-url":             { type: "string" },
-    "llm-provider":          { type: "string" },
-    "llm-api-key":           { type: "string" },
-    "llm-url":               { type: "string" },
-    "dashboard":             { type: "boolean" },
-    "dashboard-port":        { type: "string" },
-    "collection-prefix":     { type: "string" },
-    "no-watch":              { type: "boolean" },
-    "debug-log-path":        { type: "string" },
-  },
-  allowPositionals: true,
-  strict: false,
-});
+// ── RouterProviderSpec (kept for backward compat) ─────────────────────────────
 
-/** Provider block inside the "router" key of .memory.json. */
 export interface RouterProviderSpec {
   provider:  "ollama" | "anthropic" | "openai" | "gemini";
   model:     string;
@@ -45,117 +15,82 @@ export interface RouterProviderSpec {
   fallback?: RouterProviderSpec | null;
 }
 
-type ConfigFile = Partial<{
-  "qdrant-url":             string;
-  "ollama-url":             string;
-  "embed-model":            string;
-  "embed-dim":              string | number;
-  "agent-id":               string;
-  "project-id":             string;
-  "llm-model":              string;
-  "project-root":           string;
-  "generate-descriptions":  boolean;
-  "include-paths":          string[];
-  "embed-provider":         string;
-  "embed-api-key":          string;
-  "embed-url":              string;
-  "llm-provider":           string;
-  "llm-api-key":            string;
-  "llm-url":                string;
-  "dashboard-port"?:        string | number;
-  "dashboard"?:             boolean;
-  "collection-prefix"?:     string;
-  "no-watch"?:              boolean;
-  "router"?:                RouterProviderSpec;
-  "debug-log-path"?:        string;
-}>;
+// ── Runtime config ────────────────────────────────────────────────────────────
 
-let file: ConfigFile = {};
-let configDir: string | undefined;
-const configPath = values["config"] as string | undefined;
-const { INIT_CWD, PWD } = process.env;
-const workingDirectory = INIT_CWD || PWD || process.cwd()
-
-const resolvedConfigPath = configPath ??
-  (existsSync(resolve(workingDirectory, ".memory.json")) ? ".memory.json" : undefined);
-
-if (resolvedConfigPath) {
-  const abs = resolve(workingDirectory, resolvedConfigPath);
-  if (!existsSync(abs)) {
-    process.stderr.write(`[config] Config file not found: ${abs}\n`);
-    process.exit(1);
-  }
-  file      = JSON.parse(readFileSync(abs, "utf8")) as ConfigFile;
-  configDir = dirname(abs);
+interface RuntimeConfig {
+  qdrantUrl:            string;
+  embedProvider:        "ollama" | "openai" | "voyage";
+  embedModel:           string;
+  embedApiKey:          string;
+  embedDim:             number;
+  embedUrl:             string;
+  ollamaUrl:            string;
+  llmProvider:          "ollama" | "anthropic" | "openai" | "gemini";
+  llmModel:             string;
+  llmApiKey:            string;
+  llmUrl:               string;
+  routerConfig:         RouterProviderSpec | null;
+  collectionPrefix:     string;
+  port:                 number;
+  projectId:            string;
+  agentId:              string;
+  debugLogPath:         string;
+  watch:                boolean;
+  generateDescriptions: boolean;
+  projectRoot:          string;
+  includePaths:         string[];
+  dashboard:            boolean;
+  dashboardPort:        number;
 }
 
-function str(key: keyof ConfigFile & string, fallback: string): string {
-  if (values[key] !== undefined) return values[key] as string;
-  if (file[key]   !== undefined) return String(file[key]);
-  return fallback;
-}
-
-function bool(key: keyof ConfigFile & string, fallback: boolean): boolean {
-  if (values[key] !== undefined) return values[key] as boolean;
-  if (file[key]   !== undefined) return Boolean(file[key]);
-  return fallback;
-}
-
-const embedProvider = str("embed-provider", "ollama") as "ollama" | "openai" | "voyage";
-const llmProvider   = str("llm-provider",   "ollama") as "ollama" | "anthropic" | "openai" | "gemini";
-
-const embedApiKeyEnv = embedProvider === "openai"    ? process.env.OPENAI_API_KEY
-                     : embedProvider === "voyage"    ? process.env.VOYAGE_API_KEY
-                     : undefined;
-const llmApiKeyEnv   = llmProvider   === "anthropic" ? process.env.ANTHROPIC_API_KEY
-                     : llmProvider   === "openai"    ? process.env.OPENAI_API_KEY
-                     : llmProvider   === "gemini"    ? (process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY)
-                     : undefined;
-
-const EMBED_MODEL_DEFAULT: Record<string, string> = {
-  ollama:  "embeddinggemma:300m",
-  openai:  "text-embedding-3-small",
-  voyage:  "voyage-code-3",
-};
-const LLM_MODEL_DEFAULT: Record<string, string> = {
-  ollama:    "gemma3n:e2b",
-  anthropic: "claude-haiku-4-5-20251001",
-  openai:    "gpt-4o-mini",
-  gemini:    "gemini-2.0-flash",
+// Mutable — populated by applyServerConfig() at server startup.
+// Tools read this at call time (after startup), so values are always current.
+export const cfg: RuntimeConfig = {
+  qdrantUrl:            "http://localhost:6333",
+  embedProvider:        "ollama",
+  embedModel:           "embeddinggemma:300m",
+  embedApiKey:          "",
+  embedDim:             768,
+  embedUrl:             "",
+  ollamaUrl:            "http://localhost:11434",
+  llmProvider:          "ollama",
+  llmModel:             "gemma3n:e2b",
+  llmApiKey:            "",
+  llmUrl:               "",
+  routerConfig:         null,
+  collectionPrefix:     "",
+  port:                 7531,
+  projectId:            "default",
+  agentId:              "default",
+  debugLogPath:         process.env["MEMORY_DEBUG_LOG"] ?? "",
+  watch:                false,
+  generateDescriptions: true,
+  projectRoot:          "",
+  includePaths:         [],
+  dashboard:            true,
+  dashboardPort:        0,
 };
 
-export const cfg = Object.freeze({
-  qdrantUrl:            str("qdrant-url",   "http://localhost:6333"),
-  ollamaUrl:            str("ollama-url",   "http://localhost:11434"),
-  embedModel:           str("embed-model",  EMBED_MODEL_DEFAULT[embedProvider] ?? "embeddinggemma:300m"),
-  embedDim:             parseInt(str("embed-dim", "768"), 10),
-  embedProvider,
-  embedApiKey:          str("embed-api-key",  embedApiKeyEnv ?? ""),
-  embedUrl:             str("embed-url",       ""),
-  agentId:              str("agent-id",     "default"),
-  projectId:            str("project-id",   "default"),
-  llmModel:             str("llm-model",    LLM_MODEL_DEFAULT[llmProvider] ?? "gemma3n:e2b"),
-  llmProvider,
-  llmApiKey:            str("llm-api-key",  llmApiKeyEnv ?? ""),
-  llmUrl:               str("llm-url",       ""),
-  projectRoot:          str("project-root", configDir ?? ""),
-  generateDescriptions: bool("generate-descriptions", false),
-  includePaths:         (file["include-paths"] ?? []) as string[],
-  dashboardPort:        parseInt(str("dashboard-port", "0"), 10),
-  dashboard:            bool("dashboard", true),
-  collectionPrefix:     str("collection-prefix", ""),
-  watch:                !bool("no-watch", false),
-  routerConfig:         (file["router"] ?? null) as RouterProviderSpec | null,
-  debugLogPath:         str("debug-log-path", ""),
-});
-process.stderr.write(
-  `[config] projectId=${cfg.projectId} projectRoot=${cfg.projectRoot || "(cwd)"} includePaths=${cfg.includePaths.length}\n`
-);
-if (cfg.debugLogPath) {
-  process.stderr.write(`[config] debug log → ${cfg.debugLogPath}\n`);
+/** Called at server startup after loading ServerConfig from Qdrant. */
+export function applyServerConfig(sc: ServerConfig): void {
+  cfg.embedProvider    = sc.embed.provider as RuntimeConfig["embedProvider"];
+  cfg.embedModel       = sc.embed.model;
+  cfg.embedApiKey      = sc.embed.api_key;
+  cfg.embedDim         = sc.embed.dim;
+  cfg.embedUrl         = sc.embed.url;
+  cfg.llmProvider      = sc.llm.provider as RuntimeConfig["llmProvider"];
+  cfg.llmModel         = sc.llm.model;
+  cfg.llmApiKey        = sc.llm.api_key;
+  cfg.llmUrl           = sc.llm.url;
+  cfg.routerConfig     = sc.router as RouterProviderSpec;
+  cfg.collectionPrefix = sc.collection_prefix;
+  cfg.port             = sc.port;
+  // Propagate to qdrant module
+  setCollectionPrefix(sc.collection_prefix);
+  setEmbedDim(sc.embed.dim);
 }
 
-/** Mutable current branch — updated by the watcher on branch switch. */
+/** Mutable current branch — updated by watcher on branch switch. */
 let _currentBranch = "default";
 export function setCurrentBranch(branch: string): void { _currentBranch = branch; }
 export function getCurrentBranchCached(): string { return _currentBranch; }
