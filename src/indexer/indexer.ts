@@ -124,6 +124,7 @@ export class CodeIndexer {
       if (IGNORE_DIRS.has(part)) return true;
     }
     if (this.ignFilter?.isIgnored(absPath)) return true;
+
     if (this.includePaths.length > 0) {
       const base = resolve(this.projectRoot || ".");
       const included = this.includePaths.some(p => {
@@ -131,25 +132,32 @@ export class CodeIndexer {
         return absPath.startsWith(abs + "/") || absPath === abs;
       });
       if (!included) return true;
+    } else {
+      // If no includePaths, restrict to projectRoot
+      const base = resolve(this.projectRoot || ".");
+      if (!absPath.startsWith(base + "/") && absPath !== base) return true;
     }
     return false;
   }
 
   collectFiles(root: string): string[] {
+    const absRoot = resolve(root);
     // Build a fresh filter so rules discovered during recursion accumulate.
     const filter = new GitignoreFilter();
     this.ignFilter = filter;          // expose for shouldSkip / watcher
-    filter.addDir(root);              // root-level .gitignore / .ignore
 
     const results: string[] = [];
 
     const recurse = (dir: string) => {
       // Load ignore rules from this subdirectory (if present).
-      if (dir !== root) filter.addDir(dir);
+      filter.addDir(dir);
 
       for (const entry of readdirSync(dir)) {
         const abs = join(dir, entry);
-        const st  = statSync(abs);
+        let st: ReturnType<typeof statSync>;
+        try {
+          st = statSync(abs);
+        } catch { continue; }
 
         if (st.isDirectory()) {
           // Hard-coded skips (fastest check first).
@@ -164,8 +172,20 @@ export class CodeIndexer {
       }
     };
 
-    recurse(root);
-    return results.sort();
+    if (this.includePaths.length > 0) {
+      for (const p of this.includePaths) {
+        const abs = resolve(absRoot, p);
+        if (existsSync(abs)) {
+          const st = statSync(abs);
+          if (st.isDirectory()) recurse(abs);
+          else if (st.isFile() && !this.shouldSkip(abs)) results.push(abs);
+        }
+      }
+    } else {
+      recurse(absRoot);
+    }
+
+    return Array.from(new Set(results)).sort();
   }
 
   async deleteFile(relPath: string): Promise<void> {

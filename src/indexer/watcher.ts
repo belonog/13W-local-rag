@@ -51,7 +51,15 @@ export function startWatcher(
   const absRoot = resolve(root);
   const gitFilter = buildGitignoreFilter(absRoot);
 
-  const watcher = chokidar.watch(absRoot, {
+  const watchPaths = [absRoot];
+  if (indexer.includePaths.length > 0) {
+    for (const p of indexer.includePaths) {
+      const abs = resolve(absRoot, p);
+      if (existsSync(abs)) watchPaths.push(abs);
+    }
+  }
+
+  const watcher = chokidar.watch(Array.from(new Set(watchPaths)), {
     ignored: (absPath: string) =>
       WATCH_IGNORED.some((r) => r.test(absPath)) || gitFilter.isIgnored(absPath),
     ignoreInitial: options?.ignoreInitial ?? false,
