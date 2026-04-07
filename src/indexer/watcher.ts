@@ -65,44 +65,57 @@ export function startWatcher(
     else recordIndex(indexer.projectId, relPath, chunks, ms, ok);
   };
 
+  const pendingEvents = new Map<string, ReturnType<typeof setTimeout>>();
+
   const handle = (absPath: string) => {
     if (indexer.shouldSkip(absPath)) return;
     
-    if (options?.getState && options.getState() === "paused") {
-      if (options.enqueueEvent) options.enqueueEvent(absPath);
-      return;
+    // Deduplicate/debounce events for the same file
+    if (pendingEvents.has(absPath)) {
+      clearTimeout(pendingEvents.get(absPath));
     }
 
-    const pathBase = indexer.projectRoot ? resolve(indexer.projectRoot) : absRoot;
-    const relPath  = relative(pathBase, absPath).replace(/\\/g, "/");
+    const timer = setTimeout(() => {
+      pendingEvents.delete(absPath);
+      
+      if (options?.getState && options.getState() === "paused") {
+        if (options.enqueueEvent) options.enqueueEvent(absPath);
+        return;
+      }
 
-    if (existsSync(absPath)) {
-      const t0 = Date.now();
-      indexer
-        .indexFileIncremental(absPath, absRoot)
-        .then(([n, ms]) => {
-          if (n === 0) return;
-          process.stderr.write(`[watcher] re-indexed ${relPath}: ${n} chunks\n`);
-          doRecord(relPath, n, ms, true);
-          options?.onReindex?.(relPath, n);
-        })
-        .catch((err: unknown) => {
-          process.stderr.write(`[watcher] error ${relPath}: ${String(err)}\n`);
-          doRecord(relPath, 0, Date.now() - t0, false);
-        });
-    } else {
-      const t1 = Date.now();
-      indexer
-        .untagFile(relPath, indexer.branch)
-        .then(() => {
-          process.stderr.write(`[watcher] untagged ${relPath}\n`);
-          doRecord(relPath, 0, Date.now() - t1, true);
-        })
-        .catch((err: unknown) => {
-          process.stderr.write(`[watcher] delete error ${relPath}: ${String(err)}\n`);
-          doRecord(relPath, 0, Date.now() - t1, false);
-        });
-    }
+      const pathBase = indexer.projectRoot ? resolve(indexer.projectRoot) : absRoot;
+      const relPath  = relative(pathBase, absPath).replace(/\\/g, "/");
+
+      if (existsSync(absPath)) {
+        const t0 = Date.now();
+        indexer
+          .indexFileIncremental(absPath, absRoot)
+          .then(([n, ms]) => {
+            if (n === 0) return;
+            process.stderr.write(`[watcher] re-indexed ${relPath}: ${n} chunks\n`);
+            doRecord(relPath, n, ms, true);
+            options?.onReindex?.(relPath, n);
+          })
+          .catch((err: unknown) => {
+            process.stderr.write(`[watcher] error ${relPath}: ${String(err)}\n`);
+            doRecord(relPath, 0, Date.now() - t0, false);
+          });
+      } else {
+        const t1 = Date.now();
+        indexer
+          .untagFile(relPath, indexer.branch)
+          .then(() => {
+            process.stderr.write(`[watcher] untagged ${relPath}\n`);
+            doRecord(relPath, 0, Date.now() - t1, true);
+          })
+          .catch((err: unknown) => {
+            process.stderr.write(`[watcher] delete error ${relPath}: ${String(err)}\n`);
+            doRecord(relPath, 0, Date.now() - t1, false);
+          });
+      }
+    }, 100);
+
+    pendingEvents.set(absPath, timer);
   };
 
   watcher.on("add", handle).on("change", handle).on("unlink", handle);
