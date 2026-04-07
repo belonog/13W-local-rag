@@ -119,7 +119,14 @@ export class CodeIndexer {
     const ext   = extname(absPath);
     if (name.startsWith(".")) return true;
     if (!EXTENSIONS.has(ext)) return true;
-    if (ext === ".json" && statSync(absPath).size > 100_000) return true;
+    
+    // Safety check for file size (only if file exists)
+    if (ext === ".json" && existsSync(absPath)) {
+      try {
+        if (statSync(absPath).size > 100_000) return true;
+      } catch { /* ignore stat errors */ }
+    }
+
     for (const part of parts) {
       if (IGNORE_DIRS.has(part)) return true;
     }
