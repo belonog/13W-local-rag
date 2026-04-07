@@ -7,6 +7,52 @@ import { cfg, type RouterProviderSpec } from "./config.js";
 
 const MAX_TOKENS = 1024;
 
+// Rate limiting & Retry state
+let _pausedUntil = 0;
+const CONCURRENCY_LIMIT = 5;
+let _activeCalls = 0;
+const _queue: Array<() => void> = [];
+
+async function _acquireSlot(): Promise<void> {
+  while (_activeCalls >= CONCURRENCY_LIMIT || Date.now() < _pausedUntil) {
+    if (Date.now() < _pausedUntil) {
+      await new Promise(r => setTimeout(r, Math.max(1000, _pausedUntil - Date.now())));
+    } else {
+      await new Promise<void>(r => _queue.push(r));
+    }
+  }
+  _activeCalls++;
+}
+
+function _releaseSlot(): void {
+  _activeCalls--;
+  const next = _queue.shift();
+  if (next) next();
+}
+
+async function _withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  for (let i = 0; i < attempts; i++) {
+    await _acquireSlot();
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      const msg = String(err);
+      if (msg.includes("429") || msg.toLowerCase().includes("too many requests")) {
+        process.stderr.write(`[llm-client] hit rate limit (429), pausing for 60s (attempt ${i + 1}/${attempts})\n`);
+        _pausedUntil = Date.now() + 60_000;
+        if (i < attempts - 1) {
+          _releaseSlot();
+          continue;
+        }
+      }
+      throw err;
+    } finally {
+      _releaseSlot();
+    }
+  }
+  throw new Error("Max retries exceeded");
+}
+
 // ── Shared types ──────────────────────────────────────────────────────────────
 
 export interface ToolDef {
@@ -15,7 +61,7 @@ export interface ToolDef {
   parameters:  Record<string, unknown>; // JSON Schema "object" type
 }
 
-// ── Key resolution (moved from router.ts) ────────────────────────────────────
+// ── Key resolution ───────────────────────────────────────────────────────────
 
 export function resolveApiKey(spec: RouterProviderSpec): string {
   if (spec.api_key) return spec.api_key;
@@ -57,14 +103,16 @@ export async function callLlmSimple(
   prompt: string,
   spec:   RouterProviderSpec,
 ): Promise<string> {
-  const apiKey  = resolveApiKey(spec);
-  const baseUrl = resolveBaseUrl(spec);
-  switch (spec.provider) {
-    case "anthropic": return _callAnthropicSimple(prompt, spec.model, apiKey, baseUrl, spec.max_tokens);
-    case "openai":    return _callOpenAISimple(prompt, spec.model, apiKey, baseUrl, spec.max_tokens);
-    case "gemini":    return _callGeminiSimple(prompt, spec.model, apiKey, baseUrl, spec.max_tokens);
-    default:          return _callOllamaSimple(prompt, spec.model, baseUrl);
-  }
+  return _withRetry(() => {
+    const apiKey  = resolveApiKey(spec);
+    const baseUrl = resolveBaseUrl(spec);
+    switch (spec.provider) {
+      case "anthropic": return _callAnthropicSimple(prompt, spec.model, apiKey, baseUrl, spec.max_tokens);
+      case "openai":    return _callOpenAISimple(prompt, spec.model, apiKey, baseUrl, spec.max_tokens);
+      case "gemini":    return _callGeminiSimple(prompt, spec.model, apiKey, baseUrl, spec.max_tokens);
+      default:          return _callOllamaSimple(prompt, spec.model, baseUrl);
+    }
+  });
 }
 
 async function _callOllamaSimple(prompt: string, model: string, baseUrl: string): Promise<string> {
@@ -131,14 +179,16 @@ export async function callLlmWithTools(
   toolExecutor: (name: string, args: Record<string, unknown>) => Promise<string>,
   spec:         RouterProviderSpec,
 ): Promise<string> {
-  const apiKey  = resolveApiKey(spec);
-  const baseUrl = resolveBaseUrl(spec);
-  switch (spec.provider) {
-    case "anthropic": return _callAnthropicWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl);
-    case "openai":    return _callOpenAIWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl);
-    case "gemini":    return _callGeminiWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl);
-    default:          return _callOllamaWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, baseUrl);
-  }
+  return _withRetry(() => {
+    const apiKey  = resolveApiKey(spec);
+    const baseUrl = resolveBaseUrl(spec);
+    switch (spec.provider) {
+      case "anthropic": return _callAnthropicWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl);
+      case "openai":    return _callOpenAIWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl);
+      case "gemini":    return _callGeminiWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl);
+      default:          return _callOllamaWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, baseUrl);
+    }
+  });
 }
 
 // ── Ollama tool calling ───────────────────────────────────────────────────────
@@ -354,14 +404,16 @@ export async function callLlmTool(
   tool: ToolDef,
   spec: RouterProviderSpec,
 ): Promise<Record<string, unknown> | null> {
-  const apiKey  = resolveApiKey(spec);
-  const baseUrl = resolveBaseUrl(spec);
-  switch (spec.provider) {
-    case "anthropic": return _callAnthropicTool(prompt, tool, spec.model, apiKey, baseUrl);
-    case "openai":    return _callOpenAITool(prompt, tool, spec.model, apiKey, baseUrl);
-    case "gemini":    return _callGeminiTool(prompt, tool, spec.model, apiKey, baseUrl);
-    default:          return _callOllamaTool(prompt, tool, spec.model, baseUrl);
-  }
+  return _withRetry(() => {
+    const apiKey  = resolveApiKey(spec);
+    const baseUrl = resolveBaseUrl(spec);
+    switch (spec.provider) {
+      case "anthropic": return _callAnthropicTool(prompt, tool, spec.model, apiKey, baseUrl);
+      case "openai":    return _callOpenAITool(prompt, tool, spec.model, apiKey, baseUrl);
+      case "gemini":    return _callGeminiTool(prompt, tool, spec.model, apiKey, baseUrl);
+      default:          return _callOllamaTool(prompt, tool, spec.model, baseUrl);
+    }
+  });
 }
 
 async function _callOllamaTool(prompt: string, tool: ToolDef, model: string, baseUrl: string): Promise<Record<string, unknown> | null> {
