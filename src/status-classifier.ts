@@ -72,6 +72,23 @@ const TEMPLATES: Record<Status, string[]> = {
     "suggestion:",
     "thinking about trying",
   ],
+  observation: [
+    "observed",
+    "noticed",
+    "found that",
+    "discovered",
+    "insight:",
+    "technical nuance",
+    "behavior:",
+    "strange",
+    "unusual",
+    "noted that",
+    "it appears that",
+    "turns out",
+    "actually",
+    "interesting",
+    "pattern:",
+  ],
 };
 
 // ── Lazy-initialised embedding cache ──────────────────────────────────────────

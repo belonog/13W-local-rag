@@ -31,6 +31,7 @@ export class MemoryComponent implements OnInit {
 
   readonly overview        = signal<OverviewData | null>(null);
   readonly searchQuery     = signal("");
+  readonly searchAnswer    = signal("");
   readonly searchResults   = signal<SearchResult[]>([]);
   readonly searching       = signal(false);
   readonly loading         = signal(true);
@@ -106,19 +107,26 @@ export class MemoryComponent implements OnInit {
 
   handleSearch(): void {
     const q = this.searchQuery().trim();
-    if (!q) { this.searchResults.set([]); return; }
+    if (!q) { this.searchResults.set([]); this.searchAnswer.set(""); return; }
     this.searching.set(true);
     const pid = this.projectId();
     const url = `/api/memory/search?q=${encodeURIComponent(q)}${pid ? `&project_id=${encodeURIComponent(pid)}` : ""}`;
     void fetch(url)
-      .then(r => r.json() as Promise<{ results: SearchResult[] }>)
-      .then(data => { this.searchResults.set(data.results); this.searching.set(false); })
+      .then(r => r.json() as Promise<{ systemMessage: string; results: SearchResult[] }>)
+      .then(data => {
+        this.searchAnswer.set(data.systemMessage);
+        this.searchResults.set(data.results);
+        this.searching.set(false);
+      })
       .catch(() => { this.searching.set(false); });
   }
 
   handleSearchInput(value: string): void {
     this.searchQuery.set(value);
-    if (!value.trim()) this.searchResults.set([]);
+    if (!value.trim()) {
+      this.searchResults.set([]);
+      this.searchAnswer.set("");
+    }
   }
 
   statusClass(status: string): string {

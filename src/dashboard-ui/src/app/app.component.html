@@ -154,7 +154,7 @@
     }
 
     @if (tab() === 'playground') {
-      <app-playground [schemas]="init.schemas" />
+      <app-playground [schemas]="init.schemas" [projectId]="selectedProject()" />
     }
 
     @if (tab() === 'memory') {

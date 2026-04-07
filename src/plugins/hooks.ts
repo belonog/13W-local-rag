@@ -54,7 +54,7 @@ async function persistHookCall(
   const now        = nowIso();
   const expiresAt  = new Date(Date.now() + HOOK_CALL_TTL_DAYS * 86_400_000).toISOString();
 
-  await qd.upsert(colName("hook_calls"), {
+  await qd.upsert(colName("request_logs"), {
     points: [{
       id,
       vector: [0],
@@ -68,7 +68,7 @@ async function persistHookCall(
       },
     }],
   }).catch((err: unknown) => {
-    process.stderr.write(`[hooks] hook_calls upsert failed: ${String(err)}\n`);
+    process.stderr.write(`[hooks] request_logs upsert failed: ${String(err)}\n`);
   });
 }
 

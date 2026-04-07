@@ -18,22 +18,25 @@ export interface RouterOp {
 
 // ── Router prompt ─────────────────────────────────────────────────────────────
 
-const ROUTER_PROMPT =
-  "You are a memory extraction system for an AI coding agent. Your goal is to capture high-value insights, research findings, and technical discoveries.\n" +
-  "Analyze the conversation and tool usage logs to extract items worth persisting across sessions.\n\n" +
-  "GUIDELINES:\n" +
-  "1. RESEARCH FINDINGS: Extract discoveries made during tool usage (e.g., 'Gemma 2.0 has a bug with tool calling when enum is empty', 'The library X is not available on FreeBSD').\n" +
-  "2. ROOT CAUSES: If a problem was investigated, extract the root cause and the fix.\n" +
-  "3. RESOLVED ISSUES: When a problem mentioned earlier is fixed, mark it as 'resolved'.\n" +
-  "4. ARCHITECTURAL DECISIONS: Record any agreed-upon patterns or directions.\n" +
-  "5. STAND-ALONE TEXT: Ensure the 'text' field is clear and descriptive without needing the full context.\n\n" +
-  "Only include items with confidence > 0.6.\n" +
-  "You must call the provided tool to record your findings.\n\n" +
-  "Transcript excerpt (includes tool calls and summarized results):\n";
+const ROUTER_PROMPT = `You are a memory extraction system for an AI coding agent. Your goal is to capture high-value insights, research findings, technical discoveries, and observations about the environment.
+Analyze the conversation and tool usage logs to extract items worth persisting across sessions.
+
+GUIDELINES:
+1. TECHNICAL OBSERVATIONS: Capture subtle nuances (e.g., 'JSON editing on FreeBSD adds trailing \\n', 'The MCP tool hangs if the response exceeds 1MB').
+2. PATTERNS & ROOT CAUSES: If multiple similar problems occurred, synthesize the pattern. If a problem was investigated, extract the root cause and the fix.
+3. RESOLVED ISSUES: When a problem mentioned earlier is fixed, mark it as 'resolved'.
+4. ARCHITECTURAL DECISIONS: Record any agreed-upon patterns or directions.
+5. STAND-ALONE TEXT: Ensure the 'text' field is clear and descriptive without needing the full context.
+
+Only include items with confidence > 0.6.
+You must call the provided tool to record your findings.
+
+Transcript excerpt (includes tool calls and summarized results):
+`;
 
 const RECORD_MEMORY_TOOL: ToolDef = {
   name: "record_memory",
-  description: "Record high-value insights, research findings, and technical discoveries.",
+  description: "Record high-value insights, research findings, technical discoveries, and observations.",
   parameters: {
     type: "object",
     properties: {
@@ -43,7 +46,7 @@ const RECORD_MEMORY_TOOL: ToolDef = {
           type: "object",
           properties: {
             text: { type: "string", description: "Clear and descriptive text without needing full context" },
-            status: { type: "string", enum: ["in_progress", "resolved", "open_question", "hypothesis"] },
+            status: { type: "string", enum: ["in_progress", "resolved", "open_question", "hypothesis", "observation"] },
             confidence: { type: "number", description: "Confidence score 0.0-1.0 (must be > 0.6)" }
           },
           required: ["text", "status", "confidence"]
@@ -56,7 +59,7 @@ const RECORD_MEMORY_TOOL: ToolDef = {
 
 // ── Response parsing ──────────────────────────────────────────────────────────
 
-const VALID_STATUSES = new Set<string>(["in_progress", "resolved", "open_question", "hypothesis"]);
+const VALID_STATUSES = new Set<string>(["in_progress", "resolved", "open_question", "hypothesis", "observation"]);
 
 function extractValidOps(parsed: unknown[]): RouterOp[] {
   return parsed.flatMap((item) => {

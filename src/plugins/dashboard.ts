@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { cfg } from "../config.js";
 import { qd, colName } from "../qdrant.js";
 import { embedOne } from "../embedder.js";
+import { getProjectId, getAgentId, runWithContext } from "../request-context.js";
 
 const _dir   = dirname(fileURLToPath(import.meta.url));
 const _uiDir = resolve(_dir, "../dashboard-ui");
@@ -31,6 +32,8 @@ interface RequestEntry {
   ts:       number;
   tool:     string;
   source:   "mcp" | "playground" | "watcher" | "hook";
+  projectId: string;
+  agentId:   string;
   bytesIn:  number;
   bytesOut: number;
   ms:       number;
@@ -50,7 +53,6 @@ interface ServerInfo {
   projectId:            string;
   agentId:              string;
   version:              string;
-  watch:                boolean;
   branch:               string;
   collectionPrefix:     string;
   embedProvider:        string;
@@ -104,27 +106,50 @@ function statsSnapshot(): Record<string, unknown> {
   return out;
 }
 
-export function record(tool: string, source: "mcp" | "playground" | "hook", bytesIn: number, bytesOut: number, ms: number, ok: boolean, error?: string): void {
-  const prev = toolStats.get(tool) ?? { calls: 0, bytesIn: 0, bytesOut: 0, totalMs: 0, errors: 0 };
-  toolStats.set(tool, {
-    calls:    prev.calls    + 1,
-    bytesIn:  prev.bytesIn  + bytesIn,
-    bytesOut: prev.bytesOut + bytesOut,
-    totalMs:  prev.totalMs  + ms,
-    errors:   prev.errors   + (ok ? 0 : 1),
+async function persistEntry(entry: RequestEntry): Promise<void> {
+  const col = colName("request_logs");
+  const expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+  await qd.upsert(col, {
+    points: [{
+      id: crypto.randomUUID(),
+      vector: [0],
+      payload: { ...entry, expires_at: expiresAt },
+    }],
+  }).catch((err: unknown) => {
+    process.stderr.write(`[dashboard] failed to persist log: ${String(err)}\n`);
   });
+}
 
-  const entry: RequestEntry = { ts: Date.now(), tool, source, bytesIn, bytesOut, ms, ok, ...(error ? { error } : {}) };
+function updateStats(entry: RequestEntry): void {
+  const prev = toolStats.get(entry.tool) ?? { calls: 0, bytesIn: 0, bytesOut: 0, totalMs: 0, errors: 0 };
+  toolStats.set(entry.tool, {
+    calls:    prev.calls    + 1,
+    bytesIn:  prev.bytesIn  + entry.bytesIn,
+    bytesOut: prev.bytesOut + entry.bytesOut,
+    totalMs:  prev.totalMs  + entry.ms,
+    errors:   prev.errors   + (entry.ok ? 0 : 1),
+  });
+}
+
+export function record(tool: string, source: "mcp" | "playground" | "hook", bytesIn: number, bytesOut: number, ms: number, ok: boolean, error?: string): void {
+  const projectId = getProjectId();
+  const agentId   = getAgentId();
+
+  const entry: RequestEntry = { ts: Date.now(), tool, source, projectId, agentId, bytesIn, bytesOut, ms, ok, ...(error ? { error } : {}) };
+  updateStats(entry);
   requestLog.push(entry);
   if (requestLog.length > LOG_MAX) requestLog.shift();
 
   const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot(), memory: memStats() })}\n\n`;
   for (const res of new Set(sseClients)) res.write(data);
+
+  persistEntry(entry).catch(() => undefined);
 }
 
-export function recordIndex(relPath: string, chunks: number, ms: number, ok: boolean): void {
+export function recordIndex(projectId: string, relPath: string, chunks: number, ms: number, ok: boolean): void {
   if (!_active) return;
-  const entry: RequestEntry = { ts: Date.now(), tool: relPath, source: "watcher", bytesIn: 0, bytesOut: 0, ms, ok, chunks };
+  const entry: RequestEntry = { ts: Date.now(), tool: relPath, source: "watcher", projectId, agentId: "indexer", bytesIn: 0, bytesOut: 0, ms, ok, chunks };
+  updateStats(entry);
   requestLog.push(entry);
   if (requestLog.length > LOG_MAX) requestLog.shift();
 
@@ -146,6 +171,8 @@ export function recordIndex(relPath: string, chunks: number, ms: number, ok: boo
       }
     }, 1_000 - elapsed);
   }
+
+  persistEntry(entry).catch(() => undefined);
 }
 
 function openBrowser(url: string): void {
@@ -284,14 +311,13 @@ export function endReindex(): void {
   _reindexProgress = null;
 }
 
-export function initDashboardState(toolSchemas: ToolSchemaDef[], dispatch: DispatchFn): void {
+export async function initDashboardState(toolSchemas: ToolSchemaDef[], dispatch: DispatchFn): Promise<void> {
   _active = true;
   _dispatch = dispatch;
   _serverInfo = {
     projectId:            cfg.projectId,
     agentId:              cfg.agentId,
     version:              PKG_VERSION,
-    watch:                cfg.watch,
     branch:               getCurrentBranch(cfg.projectRoot),
     collectionPrefix:     cfg.collectionPrefix,
     embedProvider:        cfg.embedProvider,
@@ -302,6 +328,31 @@ export function initDashboardState(toolSchemas: ToolSchemaDef[], dispatch: Dispa
   };
   _serverInfoJson = JSON.stringify(_serverInfo);
   _toolSchemasJson = JSON.stringify(toolSchemas);
+
+  // Load history from Qdrant
+  try {
+    const col = colName("request_logs");
+    const result = await qd.scroll(col, {
+      limit: 1000,
+      with_payload: true,
+      with_vector: false,
+    });
+    
+    const entries = result.points
+      .map(p => p.payload as unknown as RequestEntry)
+      .filter(e => e && typeof e.ts === "number")
+      .sort((a, b) => a.ts - b.ts);
+
+    for (const entry of entries) {
+      updateStats(entry);
+      requestLog.push(entry);
+      if (requestLog.length > LOG_MAX) requestLog.shift();
+    }
+    process.stderr.write(`[dashboard] loaded ${entries.length} historical records from Qdrant\n`);
+  } catch (err: unknown) {
+    process.stderr.write(`[dashboard] failed to load history: ${String(err)}\n`);
+  }
+
   process.on("SIGINT",  () => { broadcastShutdown(); process.exit(0); });
   process.on("SIGTERM", () => { broadcastShutdown(); process.exit(0); });
 }
@@ -352,22 +403,27 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     return { stats: statsSnapshot(), memory: memStats() };
   });
 
-  fastify.post<{ Body: { tool: string; args: Record<string, unknown> } }>("/api/run", (req, reply) => {
+  fastify.post<{ Body: { tool: string; args: Record<string, unknown>; project_id?: string; agent_id?: string } }>("/api/run", (req, reply) => {
     const t0      = Date.now();
-    const { tool, args } = req.body;
+    const { tool, args, project_id, agent_id } = req.body;
     const bytesIn = JSON.stringify(args ?? {}).length;
-    void _dispatch!(tool, args ?? {})
-      .then(result => {
+
+    const projectId = project_id || "default";
+    const agentId   = agent_id   || "playground";
+
+    void runWithContext({ projectId, agentId }, async () => {
+      try {
+        const result = await _dispatch!(tool, args ?? {});
         const ms = Date.now() - t0;
         record(tool, "playground", bytesIn, result.length, ms, true);
         void reply.send({ ok: true, result, ms });
-      })
-      .catch((err: unknown) => {
+      } catch (err: unknown) {
         const ms     = Date.now() - t0;
         const errStr = err instanceof Error ? (err.stack ?? err.message) : String(err);
         record(tool, "playground", bytesIn, 0, ms, false, errStr);
         void reply.code(500).send({ ok: false, error: String(err), ms });
-      });
+      }
+    });
   });
 
   fastify.get<{ Querystring: { project_id?: string } }>("/api/memory/overview", async (req) => {
@@ -417,54 +473,68 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     };
   });
 
-  fastify.get<{ Querystring: { q?: string; project_id?: string } }>("/api/memory/search", async (req) => {
+  fastify.get<{ Querystring: { q?: string; project_id?: string; agent_id?: string } }>("/api/memory/search", async (req) => {
     const q = (req.query.q ?? "").trim();
-    if (!q) return { results: [] };
+    if (!q) return { systemMessage: "", results: [] };
 
-    const vector    = await embedOne(q);
-    const mustFilter: any[] = [];
-    if (req.query.project_id) {
-      mustFilter.push({ key: "project_id", match: { value: req.query.project_id } });
-    }
+    const projectId = req.query.project_id || "default";
+    const agentId   = req.query.agent_id   || projectId;
 
-    type QHit = Awaited<ReturnType<typeof qd.search>>[number];
-    const [memHits, agentHits] = await Promise.all([
-      qd.search(colName("memory"), {
-        vector, filter: { must: mustFilter }, limit: 10, with_payload: true, score_threshold: 0.5,
-      }).catch((): QHit[] => []),
-      qd.search(colName("memory_agents"), {
-        vector, filter: { must: mustFilter }, limit: 10, with_payload: true, score_threshold: 0.5,
-      }).catch((): QHit[] => []),
-    ]);
+    const { runWithContext } = await import("../request-context.js");
+    const { runArchivist }   = await import("../archivist.js");
 
-    const seen: Set<string> = new Set();
-    const results: Array<{ id: string; text: string; status: string; confidence: number; score: number; session_type: string; updated_at: string }> = [];
-    for (const hit of [...memHits, ...agentHits]) {
-      const p    = (hit.payload ?? {}) as Record<string, unknown>;
-      const hash = String(p["content_hash"] ?? hit.id);
-      if (seen.has(hash)) continue;
-      seen.add(hash);
-      results.push({
-        id:           String(hit.id),
-        text:         String(p["text"] ?? ""),
-        status:       String(p["status"] ?? "resolved"),
-        confidence:   Number(p["confidence"] ?? 0),
-        score:        hit.score,
-        session_type: String(p["session_type"] ?? ""),
-        updated_at:   String(p["updated_at"] ?? ""),
-      });
-    }
+    return runWithContext({ projectId, agentId }, async () => {
+      // 1. Run LLM-powered archivist (same as hook-recall)
+      const systemMessage = await runArchivist(q);
 
-    results.sort((a, b) => b.score - a.score);
-    return { results: results.slice(0, 5) };
+      // 2. Also do raw vector search for the UI hits
+      const vector    = await embedOne(q);
+      const mustFilter: any[] = [{ key: "project_id", match: { value: projectId } }];
+
+      type QHit = Awaited<ReturnType<typeof qd.search>>[number];
+      const [memHits, agentHits] = await Promise.all([
+        qd.search(colName("memory"), {
+          vector, filter: { must: mustFilter }, limit: 10, with_payload: true, score_threshold: 0.5,
+        }).catch((): QHit[] => []),
+        qd.search(colName("memory_agents"), {
+          vector, filter: { must: mustFilter }, limit: 10, with_payload: true, score_threshold: 0.5,
+        }).catch((): QHit[] => []),
+      ]);
+
+      const seen: Set<string> = new Set();
+      const results: Array<{ id: string; text: string; status: string; confidence: number; score: number; session_type: string; updated_at: string }> = [];
+      for (const hit of [...memHits, ...agentHits]) {
+        const p    = (hit.payload ?? {}) as Record<string, unknown>;
+        const hash = String(p["content_hash"] ?? hit.id);
+        if (seen.has(hash)) continue;
+        seen.add(hash);
+        results.push({
+          id:           String(hit.id),
+          text:         String(p["text"] ?? ""),
+          status:       String(p["status"] ?? "resolved"),
+          confidence:   Number(p["confidence"] ?? 0),
+          score:        hit.score,
+          session_type: String(p["session_type"] ?? ""),
+          updated_at:   String(p["updated_at"] ?? ""),
+        });
+      }
+      results.sort((a, b) => b.score - a.score);
+
+      return { systemMessage, results: results.slice(0, 5) };
+    });
   });
 
   fastify.post("/api/projects", async (req, reply) => {
     const { upsertProjectConfig, mergeProjectConfig } = await import("../server-config.js");
     const { qd } = await import("../qdrant.js");
+    const { IndexerManager } = await import("../indexer/manager.js");
     const body = req.body as Partial<import("../server-config.js").ProjectConfig> & { project_id: string };
     if (!body.project_id) return reply.code(400).send({ error: "Missing project_id" });
-    await upsertProjectConfig(qd, mergeProjectConfig(body));
+    const updated = mergeProjectConfig(body);
+    await upsertProjectConfig(qd, updated);
+    const { readLocalConfig, defaultLocalConfigPath } = await import("../local-config.js");
+    const localConfig = await readLocalConfig(defaultLocalConfigPath());
+    await IndexerManager.syncProject(updated, localConfig);
     return reply.code(201).send({ ok: true });
   });
 
@@ -506,9 +576,14 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
   fastify.put<{ Params: { projectId: string } }>("/api/projects/:projectId", async (req, reply) => {
     const { loadProjectConfig, upsertProjectConfig, mergeProjectConfig } = await import("../server-config.js");
     const { qd } = await import("../qdrant.js");
+    const { IndexerManager } = await import("../indexer/manager.js");
     const body = req.body as Record<string, unknown>;
     const current = await loadProjectConfig(qd, req.params.projectId) ?? mergeProjectConfig({ project_id: req.params.projectId });
-    await upsertProjectConfig(qd, mergeProjectConfig({ ...current, ...body, project_id: req.params.projectId }));
+    const updated = mergeProjectConfig({ ...current, ...body, project_id: req.params.projectId });
+    await upsertProjectConfig(qd, updated);
+    const { readLocalConfig, defaultLocalConfigPath } = await import("../local-config.js");
+    const localConfig = await readLocalConfig(defaultLocalConfigPath());
+    await IndexerManager.syncProject(updated, localConfig);
     return reply.send({ ok: true });
   });
 }
@@ -520,7 +595,7 @@ export function startDashboard(port: number, toolSchemas: ToolSchemaDef[], dispa
   import("fastify").then(({ default: Fastify }) => {
     const app = Fastify({ logger: false });
     void dashboardPlugin(app).then(() => {
-      app.listen({ port, host: "127.0.0.1" })
+      app.listen({ port, host: "0.0.0.0" })
         .then(() => {
           const addr = app.server.address();
           const actualPort = typeof addr === "object" && addr ? addr.port : port;

@@ -1,8 +1,10 @@
-import { getProjectId } from "../config.js";
+import { cfg, getProjectId } from "../config.js";
 import { qd } from "../qdrant.js";
 import { deleteById } from "../storage.js";
 import { storeMemory, colForType } from "../util.js";
 import type { MemoryType, ScopeType } from "../types.js";
+import { callLlmSimple, defaultRouterSpec } from "../llm-client.js";
+import { debugLog } from "../util.js";
 
 export interface ConsolidateArgs {
   source:               string;
@@ -19,12 +21,24 @@ function dotProduct(a: number[], b: number[]): number {
   return sum;
 }
 
+const SYNTHESIS_PROMPT = 
+  "You are a memory consolidation system for an AI agent. Your goal is to synthesize multiple similar memories into a single, high-value insight or experience entry.\\n\\n" +
+  "GOALS:\\n" +
+  "1. IDENTIFY PATTERNS: If multiple entries describe similar problems or behaviors, formulate a general rule or pattern.\\n" +
+  "2. CAPTURE OBSERVATIONS: If entries contain subtle technical nuances (e.g. env quirks, tool behavior), ensure they are preserved as 'insights'.\\n" +
+  "3. CLEANUP: Remove duplicates, outdated details, and conversational filler.\\n" +
+  "4. STAND-ALONE TEXT: The resulting text must be clear and descriptive without needing context.\\n\\n" +
+  "OUTPUT FORMAT:\\n" +
+  "Output JSON only: { \"text\": \"...\", \"status\": \"observation|resolved|in_progress\" }\\n\\n" +
+  "Input memories to synthesize:\\n";
+
 export async function consolidateTool(a: ConsolidateArgs): Promise<string> {
   const srcCol = colForType(a.source);
+  const projectId = getProjectId();
 
   const { points } = await qd.scroll(srcCol, {
     filter: {
-      must: [{ key: "project_id", match: { value: getProjectId() } }],
+      must: [{ key: "project_id", match: { value: projectId } }],
     },
     limit:        500,
     with_vector: true,
@@ -58,7 +72,7 @@ export async function consolidateTool(a: ConsolidateArgs): Promise<string> {
 
   if (clusters.length === 0) return "no groups to merge (everything is unique).";
 
-  const lines = [`Found ${clusters.length} groups:\n`];
+  const lines = [`Found ${clusters.length} groups to synthesize:\\n`];
   let mergedTotal = 0;
 
   for (let ci = 0; ci < clusters.length; ci++) {
@@ -68,24 +82,59 @@ export async function consolidateTool(a: ConsolidateArgs): Promise<string> {
 
     lines.push(`  Group ${ci + 1} (${cluster.length} records):`);
     for (const idx of cluster) {
-      lines.push(`    - ${String(p(points[idx]!)["content"] ?? "").slice(0, 100)}`);
+      lines.push(`    - ${String(p(points[idx]!)["content"] ?? p(points[idx]!)["text"] ?? "").slice(0, 100)}`);
     }
 
     if (!a.dry_run) {
       const fullContents = cluster.map((idx) =>
-        String(p(points[idx]!)["content"] ?? "")
+        String(p(points[idx]!)["content"] ?? p(points[idx]!)["text"] ?? "")
       );
-      const combined = fullContents.join(" | ");
+      
+      const prompt = SYNTHESIS_PROMPT + fullContents.map(c => `- ${c}`).join("\n");
+      const spec = cfg.routerConfig ?? defaultRouterSpec();
+      
+      debugLog("consolidate", `Synthesizing group ${ci + 1} with ${cluster.length} items...`);
+      
+      let synthesizedText = "";
+      let synthesizedStatus: string | undefined;
+
+      try {
+        const raw = await callLlmSimple(prompt, spec);
+        const match = raw.match(/\{[\s\S]*?\}/);
+        if (match) {
+          const parsed = JSON.parse(match[0]);
+          synthesizedText = String(parsed.text || "").trim();
+          synthesizedStatus = String(parsed.status || "");
+        } else {
+          synthesizedText = raw.trim();
+        }
+      } catch (err) {
+        debugLog("consolidate", `Synthesis failed, falling back to simple join: ${String(err)}`);
+        synthesizedText = `[Consolidated] ` + fullContents.join(" | ");
+      }
+
+      if (!synthesizedText) {
+        synthesizedText = `[Consolidated] ` + fullContents.join(" | ");
+      }
+
       const maxImp = cluster.reduce((m, idx) => {
         const imp = Number(p(points[idx]!)["importance"] ?? 0.5);
         return Math.max(m, imp);
       }, 0);
 
+      // Determine the best tag/type
+      const tags = cluster.flatMap(idx => {
+        const t = p(points[idx]!)["tags"];
+        return Array.isArray(t) ? t : [];
+      });
+      const uniqueTags = Array.from(new Set([...tags, "synthesized"]));
+
       await storeMemory({
-        content:    `[Consolidated] ${combined}`,
+        content:    synthesizedText,
         memoryType: a.target as MemoryType,
         scope:      "project" as ScopeType,
-        tags:       "consolidated",
+        status:     (synthesizedStatus as any) || (a.target === "semantic" ? "resolved" : "observation"),
+        tags:       uniqueTags.join(","),
         importance: Math.min(maxImp + 0.1, 1.0),
         ttlHours:   0,
       });
@@ -100,9 +149,9 @@ export async function consolidateTool(a: ConsolidateArgs): Promise<string> {
   }
 
   if (!a.dry_run) {
-    lines.push(`\nMerged ${mergedTotal} records into ${clusters.length} clusters`);
+    lines.push(`\\nSynthesized ${mergedTotal} records into ${clusters.length} new insights.`);
   } else {
-    lines.push(`\nDry run. Call consolidate(dry_run=false) to execute.`);
+    lines.push(`\\nDry run. Call consolidate(dry_run=false) to execute.`);
   }
 
   return lines.join("\n");

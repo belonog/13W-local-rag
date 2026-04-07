@@ -8,11 +8,12 @@ export { getProjectId, getAgentId };
 // ── RouterProviderSpec (kept for backward compat) ─────────────────────────────
 
 export interface RouterProviderSpec {
-  provider:  "ollama" | "anthropic" | "openai" | "gemini";
-  model:     string;
-  api_key?:  string;
-  url?:      string;
-  fallback?: RouterProviderSpec | null;
+  provider:    "ollama" | "anthropic" | "openai" | "gemini";
+  model:       string;
+  api_key?:    string;
+  url?:        string;
+  max_tokens?: number;
+  fallback?:   RouterProviderSpec | null;
 }
 
 // ── Runtime config ────────────────────────────────────────────────────────────
@@ -35,7 +36,6 @@ interface RuntimeConfig {
   projectId:            string;
   agentId:              string;
   debugLogPath:         string;
-  watch:                boolean;
   generateDescriptions: boolean;
   projectRoot:          string;
   includePaths:         string[];
@@ -63,7 +63,6 @@ export const cfg: RuntimeConfig = {
   projectId:            "default",
   agentId:              "default",
   debugLogPath:         process.env["MEMORY_DEBUG_LOG"] ?? "",
-  watch:                false,
   generateDescriptions: true,
   projectRoot:          "",
   includePaths:         [],

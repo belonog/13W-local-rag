@@ -37,16 +37,15 @@ export interface ToolSchemaDef {
 }
 
 export interface ServerInfo {
-  projectId:            string;
-  agentId:              string;
-  version:              string;
-  watch:                boolean;
-  branch:               string;
-  collectionPrefix:     string;
-  embedProvider:        string;
-  embedModel:           string;
-  llmProvider:          string;
-  llmModel:             string;
+  projectId: string;
+  agentId: string;
+  version: string;
+  branch: string;
+  collectionPrefix: string;
+  embedProvider: string;
+  embedModel: string;
+  llmProvider: string;
+  llmModel: string;
   generateDescriptions: boolean;
 }
 

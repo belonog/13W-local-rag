@@ -39,11 +39,12 @@ export interface StoreMemoryParams {
   tags:       string;
   importance: number;
   ttlHours:   number;
+  status?:    Status;
 }
 
 // ── New memory schema (specification.md) ──────────────────────────────────────
 
-export type Status      = "in_progress" | "resolved" | "open_question" | "hypothesis";
+export type Status      = "in_progress" | "resolved" | "open_question" | "hypothesis" | "observation";
 export type SessionType = "planning" | "editing" | "headless" | "multi_agent";
 
 /** Canonical payload for `memory` and `memory_agents` collections. */

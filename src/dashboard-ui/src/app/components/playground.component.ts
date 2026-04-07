@@ -17,6 +17,7 @@ function formatJson(raw: string): string {
 })
 export class PlaygroundComponent {
   readonly schemas = input.required<ToolSchemaDef[]>();
+  readonly projectId = input<string>("default");
 
   readonly selectedTool = signal("");
   readonly argValues    = signal<Record<string, string | boolean>>({});
@@ -114,7 +115,12 @@ export class PlaygroundComponent {
     fetch("/api/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tool: this.selectedTool(), args }),
+      body: JSON.stringify({
+        tool: this.selectedTool(),
+        args,
+        project_id: this.projectId(),
+        agent_id: "playground"
+      }),
     })
       .then(r => r.json() as Promise<RunResult>)
       .then(data => {

@@ -13,12 +13,6 @@
     <span class="text-(--color-text)">{{ info().version }}</span>
   </span>
   <span class="inline-flex items-center gap-1 bg-(--color-surface) px-[0.45rem] py-[0.15rem] rounded-[3px] whitespace-nowrap">
-    <span class="text-(--color-muted)">index</span>
-    <span [class]="info().watch ? 'text-(--color-ok)' : 'text-(--color-err)'">
-      {{ info().watch ? '✓ on' : '✗ off' }}
-    </span>
-  </span>
-  <span class="inline-flex items-center gap-1 bg-(--color-surface) px-[0.45rem] py-[0.15rem] rounded-[3px] whitespace-nowrap">
     <span class="text-(--color-muted)">descriptions</span>
     <span [class]="info().generateDescriptions ? 'text-(--color-ok)' : 'text-(--color-err)'">
       {{ info().generateDescriptions ? '✓ on' : '✗ off' }}

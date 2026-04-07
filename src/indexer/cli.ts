@@ -34,7 +34,12 @@ if (!cmd) {
   process.exit(1);
 }
 
-const indexer = new CodeIndexer({ generateDescriptions: cfg.generateDescriptions });
+const indexer = new CodeIndexer({
+  projectId: cfg.projectId,
+  projectRoot: cfg.projectRoot,
+  includePaths: cfg.includePaths,
+  generateDescriptions: cfg.generateDescriptions,
+});
 await indexer.ensureCollection();
 
 async function expandRoots(root: string): Promise<string[]> {

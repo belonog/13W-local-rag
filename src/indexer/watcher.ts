@@ -34,12 +34,19 @@ function buildGitignoreFilter(root: string): GitignoreFilter {
   return filter;
 }
 
+export interface WatcherOptions {
+  ignoreInitial?: boolean;
+  onReindex?: (relPath: string, chunks: number) => void;
+  onRecordIndex?: (relPath: string, chunks: number, ms: number, ok: boolean) => void;
+  onReady?: () => void;
+  getState?: () => "running" | "paused" | "stopped";
+  enqueueEvent?: (absPath: string) => void;
+}
+
 export function startWatcher(
   root: string,
   indexer: CodeIndexer,
-  onReindex?: (relPath: string, chunks: number) => void,
-  onReady?: () => void,
-  ignoreInitial = false,
+  options?: WatcherOptions
 ): void {
   const absRoot = resolve(root);
   const gitFilter = buildGitignoreFilter(absRoot);
@@ -47,15 +54,26 @@ export function startWatcher(
   const watcher = chokidar.watch(absRoot, {
     ignored: (absPath: string) =>
       WATCH_IGNORED.some((r) => r.test(absPath)) || gitFilter.isIgnored(absPath),
-    ignoreInitial,
+    ignoreInitial: options?.ignoreInitial ?? false,
     persistent: false,
     usePolling: false,
     awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
   });
 
+  const doRecord = (relPath: string, chunks: number, ms: number, ok: boolean) => {
+    if (options?.onRecordIndex) options.onRecordIndex(relPath, chunks, ms, ok);
+    else recordIndex(indexer.projectId, relPath, chunks, ms, ok);
+  };
+
   const handle = (absPath: string) => {
     if (indexer.shouldSkip(absPath)) return;
-    const pathBase = cfg.projectRoot ? resolve(cfg.projectRoot) : absRoot;
+    
+    if (options?.getState && options.getState() === "paused") {
+      if (options.enqueueEvent) options.enqueueEvent(absPath);
+      return;
+    }
+
+    const pathBase = indexer.projectRoot ? resolve(indexer.projectRoot) : absRoot;
     const relPath  = relative(pathBase, absPath).replace(/\\/g, "/");
 
     if (existsSync(absPath)) {
@@ -65,12 +83,12 @@ export function startWatcher(
         .then(([n, ms]) => {
           if (n === 0) return;
           process.stderr.write(`[watcher] re-indexed ${relPath}: ${n} chunks\n`);
-          recordIndex(relPath, n, ms, true);
-          onReindex?.(relPath, n);
+          doRecord(relPath, n, ms, true);
+          options?.onReindex?.(relPath, n);
         })
         .catch((err: unknown) => {
           process.stderr.write(`[watcher] error ${relPath}: ${String(err)}\n`);
-          recordIndex(relPath, 0, Date.now() - t0, false);
+          doRecord(relPath, 0, Date.now() - t0, false);
         });
     } else {
       const t1 = Date.now();
@@ -78,17 +96,17 @@ export function startWatcher(
         .untagFile(relPath, indexer.branch)
         .then(() => {
           process.stderr.write(`[watcher] untagged ${relPath}\n`);
-          recordIndex(relPath, 0, Date.now() - t1, true);
+          doRecord(relPath, 0, Date.now() - t1, true);
         })
         .catch((err: unknown) => {
           process.stderr.write(`[watcher] delete error ${relPath}: ${String(err)}\n`);
-          recordIndex(relPath, 0, Date.now() - t1, false);
+          doRecord(relPath, 0, Date.now() - t1, false);
         });
     }
   };
 
   watcher.on("add", handle).on("change", handle).on("unlink", handle);
-  watcher.once("ready", () => onReady?.());
+  watcher.once("ready", () => options?.onReady?.());
 
   process.stderr.write(`[watcher] Watching ${absRoot}\n`);
 
