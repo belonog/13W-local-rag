@@ -4,7 +4,7 @@
  */
 
 import { cfg } from "./config.js";
-import { callLlmSimple, defaultRouterSpec } from "./llm-client.js";
+import { callLlmTool, defaultRouterSpec, type ToolDef } from "./llm-client.js";
 import { debugLog } from "./util.js";
 import type { Status } from "./types.js";
 
@@ -27,72 +27,38 @@ const ROUTER_PROMPT =
   "3. RESOLVED ISSUES: When a problem mentioned earlier is fixed, mark it as 'resolved'.\n" +
   "4. ARCHITECTURAL DECISIONS: Record any agreed-upon patterns or directions.\n" +
   "5. STAND-ALONE TEXT: Ensure the 'text' field is clear and descriptive without needing the full context.\n\n" +
-  "For each item output JSON: { \"text\": \"...\", \"status\": \"...\", \"confidence\": 0.0-1.0 }\n" +
-  "Status: in_progress, resolved, open_question, hypothesis\n" +
   "Only include items with confidence > 0.6.\n" +
-  "Output a JSON array only. No explanation. No markdown.\n\n" +
+  "You must call the provided tool to record your findings.\n\n" +
   "Transcript excerpt (includes tool calls and summarized results):\n";
+
+const RECORD_MEMORY_TOOL: ToolDef = {
+  name: "record_memory",
+  description: "Record high-value insights, research findings, and technical discoveries.",
+  parameters: {
+    type: "object",
+    properties: {
+      operations: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "Clear and descriptive text without needing full context" },
+            status: { type: "string", enum: ["in_progress", "resolved", "open_question", "hypothesis"] },
+            confidence: { type: "number", description: "Confidence score 0.0-1.0 (must be > 0.6)" }
+          },
+          required: ["text", "status", "confidence"]
+        }
+      }
+    },
+    required: ["operations"]
+  }
+};
 
 // ── Response parsing ──────────────────────────────────────────────────────────
 
 const VALID_STATUSES = new Set<string>(["in_progress", "resolved", "open_question", "hypothesis"]);
 
-function parseOps(raw: string): RouterOp[] {
-  const candidates: string[] = [];
-  
-  // 1. Find all possible array blocks [...]
-  const arrayRe = /\[[\s\S]*?\]/g;
-  let m: RegExpExecArray | null;
-  while ((m = arrayRe.exec(raw)) !== null) candidates.push(m[0]);
-
-  // 2. If no arrays, maybe it's a list of separate objects { ... } { ... }
-  if (candidates.length === 0) {
-    const objRe = /\{[\s\S]*?\}/g;
-    while ((m = objRe.exec(raw)) !== null) candidates.push(m[0]);
-  }
-
-  // 3. Fallback: take everything from the first [ or { to the end
-  const firstBracket = Math.min(
-    raw.indexOf("[") === -1 ? Infinity : raw.indexOf("["),
-    raw.indexOf("{") === -1 ? Infinity : raw.indexOf("{")
-  );
-  if (firstBracket !== Infinity) {
-    candidates.push(raw.slice(firstBracket));
-  }
-
-  let parsed: unknown[] = [];
-  let found = false;
-
-  // Try candidates from longest to shortest
-  const sorted = candidates.sort((a, b) => b.length - a.length);
-
-  for (const candidate of sorted) {
-    try {
-      const p = JSON.parse(candidate);
-      if (Array.isArray(p)) {
-        parsed = p;
-        found = true;
-        break;
-      }
-      if (typeof p === "object" && p !== null) {
-        parsed = [p]; // single object becomes one-item array
-        found = true;
-        break;
-      }
-    } catch {
-      // maybe it's truncated? try to close brackets
-      try {
-        if (candidate.startsWith("[")) {
-          parsed = JSON.parse(candidate + "]") as unknown[];
-          found = true;
-          break;
-        }
-      } catch { /* skip */ }
-    }
-  }
-
-  if (!found) return [];
-
+function extractValidOps(parsed: unknown[]): RouterOp[] {
   return parsed.flatMap((item) => {
     if (typeof item !== "object" || !item) return [];
     const o = item as Record<string, unknown>;
@@ -119,37 +85,35 @@ export async function runRouter(window: string): Promise<RouterOp[]> {
 
   debugLog("router", `calling provider=${primarySpec.provider} model=${primarySpec.model} prompt_len=${prompt.length}`);
 
-  const raw = await (async () => {
+  const args = await (async () => {
     try {
-      const r = await callLlmSimple(prompt, primarySpec);
-      debugLog("router", `primary response len=${r.length}`);
+      const r = await callLlmTool(prompt, RECORD_MEMORY_TOOL, primarySpec);
+      debugLog("router", `primary tool call successful: ${r !== null}`);
       return r;
     } catch (primaryErr: unknown) {
       process.stderr.write(`[router] primary failed: ${String(primaryErr)}\n`);
       debugLog("router", `primary failed: ${String(primaryErr)}`);
-      if (!fallbackSpec) return "";
+      if (!fallbackSpec) return null;
       debugLog("router", `trying fallback provider=${fallbackSpec.provider} model=${fallbackSpec.model}`);
       try {
-        const r = await callLlmSimple(prompt, fallbackSpec);
-        debugLog("router", `fallback response len=${r.length}`);
+        const r = await callLlmTool(prompt, RECORD_MEMORY_TOOL, fallbackSpec);
+        debugLog("router", `fallback tool call successful: ${r !== null}`);
         return r;
       } catch (fallbackErr: unknown) {
         process.stderr.write(`[router] fallback failed: ${String(fallbackErr)}\n`);
         debugLog("router", `fallback failed: ${String(fallbackErr)}`);
-        return "";
+        return null;
       }
     }
   })();
 
-  if (!raw) return [];
-
-  // Log the full raw response for debugging before parsing
-  debugLog("router", `raw response: ${raw}`);
-
-  const ops = parseOps(raw);
-  debugLog("router", `parsed ops=${ops.length}`);
-  if (ops.length === 0 && raw.trim()) {
-    debugLog("router", `parsing failed, raw head: ${raw.trim().slice(0, 300)}...`);
+  if (!args || !Array.isArray(args.operations)) {
+    debugLog("router", "no valid operations found or tool was not called");
+    return [];
   }
+
+  const ops = extractValidOps(args.operations);
+  debugLog("router", `extracted ops=${ops.length}`);
+  
   return ops;
 }
