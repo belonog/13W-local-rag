@@ -58,7 +58,8 @@
       @if (searchResults().length > 0) {
         <div class="flex flex-col gap-1.5">
           @for (r of searchResults(); track r.id) {
-            <div class="rounded-[4px] border border-(--color-border) bg-(--color-surface) px-3 py-2">
+            <div class="rounded-[4px] border border-(--color-border) bg-(--color-surface) px-3 py-2 cursor-pointer hover:border-(--color-indigo)/50 transition-colors"
+                 (click)="toggleExpand(r.id)">
               <div class="flex items-center gap-2 mb-1">
                 <span class="text-[0.7rem] px-1.5 py-0.5 rounded-[3px] border font-mono"
                       [class]="statusClass(r.status)">{{ r.status }}</span>
@@ -70,7 +71,16 @@
                 </span>
                 <span class="ml-auto text-[0.68rem] text-(--color-muted)">{{ fmtDate(r.updated_at) }}</span>
               </div>
-              <p class="text-xs text-(--color-text) m-0 leading-relaxed">{{ truncate(r.text) }}</p>
+              @if (expandedId() === r.id) {
+                <p class="text-xs text-(--color-text) m-0 leading-relaxed whitespace-pre-wrap">{{ r.text }}</p>
+                <div class="mt-2 pt-2 border-t border-(--color-border) flex flex-wrap gap-x-4 gap-y-1 text-[0.65rem] text-(--color-muted) font-mono">
+                  <span>ID: {{ r.id }}</span>
+                  <span>Session: {{ r.session_id || 'N/A' }}</span>
+                  <span>Created: {{ fmtDate(r.created_at) }}</span>
+                </div>
+              } @else {
+                <p class="text-xs text-(--color-text) m-0 leading-relaxed">{{ truncate(r.text) }}</p>
+              }
             </div>
           }
         </div>
@@ -103,7 +113,8 @@
       } @else {
         <div class="flex flex-col gap-1.5">
           @for (e of entriesToShow(ov); track e.id) {
-            <div class="rounded-[4px] border border-(--color-border) bg-(--color-surface) px-3 py-2">
+            <div class="rounded-[4px] border border-(--color-border) bg-(--color-surface) px-3 py-2 cursor-pointer hover:border-(--color-indigo)/50 transition-colors"
+                 (click)="toggleExpand(e.id)">
               <div class="flex items-center gap-2 mb-1">
                 <span class="text-[0.7rem] px-1.5 py-0.5 rounded-[3px] border font-mono"
                       [class]="statusClass(e.status)">{{ e.status }}</span>
@@ -115,7 +126,16 @@
                 </span>
                 <span class="ml-auto text-[0.68rem] text-(--color-muted)">{{ fmtDate(e.updated_at) }}</span>
               </div>
-              <p class="text-xs text-(--color-text) m-0 leading-relaxed">{{ truncate(e.text) }}</p>
+              @if (expandedId() === e.id) {
+                <p class="text-xs text-(--color-text) m-0 leading-relaxed whitespace-pre-wrap">{{ e.text }}</p>
+                <div class="mt-2 pt-2 border-t border-(--color-border) flex flex-wrap gap-x-4 gap-y-1 text-[0.65rem] text-(--color-muted) font-mono">
+                  <span>ID: {{ e.id }}</span>
+                  <span>Session: {{ e.session_id || 'N/A' }}</span>
+                  <span>Created: {{ fmtDate(e.created_at) }}</span>
+                </div>
+              } @else {
+                <p class="text-xs text-(--color-text) m-0 leading-relaxed">{{ truncate(e.text) }}</p>
+              }
             </div>
           }
         </div>

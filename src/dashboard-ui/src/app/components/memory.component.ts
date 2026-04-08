@@ -8,8 +8,10 @@ interface SearchResult {
   status:       string;
   confidence:   number;
   score:        number;
+  session_id:   string;
   session_type: string;
   updated_at:   string;
+  created_at:   string;
 }
 
 interface SessionEntry {
@@ -38,6 +40,7 @@ export class MemoryComponent implements OnInit {
   readonly selectedStatuses = signal<ReadonlySet<string>>(new Set());
   readonly filteredEntries  = signal<MemoryEntry[]>([]);
   readonly filterLoading    = signal(false);
+  readonly expandedId       = signal<string | null>(null);
 
   constructor() {
     effect(() => {
@@ -87,6 +90,14 @@ export class MemoryComponent implements OnInit {
       this._fetchByStatus(next);
     } else {
       this.filteredEntries.set([]);
+    }
+  }
+
+  toggleExpand(id: string): void {
+    if (this.expandedId() === id) {
+      this.expandedId.set(null);
+    } else {
+      this.expandedId.set(id);
     }
   }
 

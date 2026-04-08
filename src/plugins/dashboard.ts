@@ -512,7 +512,7 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
       ]);
 
       const seen: Set<string> = new Set();
-      const results: Array<{ id: string; text: string; status: string; confidence: number; score: number; session_type: string; updated_at: string }> = [];
+      const results: Array<{ id: string; text: string; status: string; confidence: number; score: number; session_id: string; session_type: string; updated_at: string; created_at: string }> = [];
       for (const hit of [...memHits, ...agentHits]) {
         const p    = (hit.payload ?? {}) as Record<string, unknown>;
         const hash = String(p["content_hash"] ?? hit.id);
@@ -524,8 +524,10 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
           status:       String(p["status"] ?? "resolved"),
           confidence:   Number(p["confidence"] ?? 0),
           score:        hit.score,
+          session_id:   String(p["session_id"] ?? ""),
           session_type: String(p["session_type"] ?? ""),
           updated_at:   String(p["updated_at"] ?? ""),
+          created_at:   String(p["created_at"] ?? ""),
         });
       }
       results.sort((a, b) => b.score - a.score);
