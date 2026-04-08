@@ -336,6 +336,7 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     root: _uiDir,
     prefix: "/",
     wildcard: false,
+    index: false,
   });
 
   fastify.get("/", async (req, reply) => {
