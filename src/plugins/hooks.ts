@@ -10,6 +10,7 @@
  */
 
 import { FastifyInstance } from "fastify";
+import { readFileSync, existsSync } from "node:fs";
 import { getProjectId } from "../config.js";
 import { qd, colName } from "../qdrant.js";
 import { runArchivist } from "../archivist.js";
@@ -21,6 +22,8 @@ import {
   nowIso,
   debugLog,
   storeMemory,
+  safeParseLines,
+  type JsonLine,
 } from "../util.js";
 import { record } from "./dashboard.js";
 
@@ -70,6 +73,61 @@ async function persistHookCall(
   }).catch((err: unknown) => {
     process.stderr.write(`[hooks] request_logs upsert failed: ${String(err)}\n`);
   });
+}
+
+type SessionType = "headless" | "multi-agent" | "editing" | "planning";
+
+interface SessionDetection {
+  type: SessionType;
+  threshold: number;
+  agentId?: string;
+}
+
+function detectSessionType(body: HookBody, lines: JsonLine[]): SessionDetection {
+  if (body.stop_hook_active) {
+    return { type: "headless", threshold: 0.85 };
+  }
+
+  // Check for multi-agent
+  for (const line of lines) {
+    if (line["type"] === "SubagentStop") {
+      const agentId = String(line["agent_id"] ?? line["subagent_id"] ?? "");
+      if (agentId) {
+        return { type: "multi-agent", threshold: 0.80, agentId };
+      }
+    }
+  }
+
+  // Check for editing
+  const editTools = [
+    "replace",
+    "write_file",
+    "edit_file",
+    "patch_file",
+    "insert_text",
+    "run_shell_command",
+  ];
+  for (const line of lines) {
+    const role = String(line["role"] ?? line["type"] ?? "");
+    if (role === "tool_use" || role === "tool_call") {
+      const name = String(
+        line["name"] ?? (line["functionCall"] as JsonLine)?.["name"] ?? "",
+      );
+      if (editTools.includes(name)) {
+        return { type: "editing", threshold: 0.75 };
+      }
+    }
+    const content = line["content"];
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block["type"] === "tool_use" && editTools.includes(block["name"])) {
+          return { type: "editing", threshold: 0.75 };
+        }
+      }
+    }
+  }
+
+  return { type: "planning", threshold: 0.75 };
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -136,8 +194,17 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
     const transcriptPath  = body.transcript_path ?? "";
     const sessionId       = body.session_id       ?? "unknown";
 
-    return runWithContext({ projectId, agentId }, async () => {
-      debugLog("hooks/remember", `session=${sessionId} transcript="${transcriptPath}"`);
+    // Detect session type and agent ID
+    const raw = (transcriptPath && existsSync(transcriptPath))
+      ? readFileSync(transcriptPath, "utf8")
+      : "";
+    const lines = safeParseLines(raw);
+    const { type: sessionType, threshold, agentId: detectedAgentId } = detectSessionType(body, lines);
+
+    const finalAgentId = detectedAgentId || agentId;
+
+    return runWithContext({ projectId, agentId: finalAgentId }, async () => {
+      debugLog("hooks/remember", `session=${sessionId} type=${sessionType} transcript="${transcriptPath}"`);
 
       let systemMessage = "";
 
@@ -150,13 +217,13 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
         }
 
         const ops: RouterOp[] = await runRouter(window);
-        debugLog("hooks/remember", `router ops=${ops.length}`);
+        debugLog("hooks/remember", `router ops=${ops.length} (threshold=${threshold})`);
 
         const directOps:     RouterOp[] = [];
         const validationOps: RouterOp[] = [];
 
         for (const op of ops) {
-          if (op.confidence >= CONFIDENCE_THRESH) {
+          if (op.confidence >= threshold) {
             directOps.push(op);
             debugLog("hooks/remember", `op band=direct conf=${op.confidence.toFixed(2)} text="${op.text.slice(0, 100)}"`);
           } else if (op.confidence >= VALIDATION_MIN_CONF) {
@@ -167,19 +234,21 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
           }
         }
 
+        const memType = sessionType === "multi-agent" ? "memory_agents" : "memory";
+
         for (const op of directOps) {
           const result = await storeMemory({
             content:    op.text,
             status:     op.status,
-            memoryType: "episodic",
+            memoryType: memType,
             scope:      "project",
             tags:       "",
             importance: op.confidence,
             ttlHours:   0,
             sessionId:  sessionId,
-            sessionType: "editing", // Default for direct ops from transcript
+            sessionType: sessionType,
           });
-          debugLog("hooks/remember", `op written status=${op.status} conf=${op.confidence.toFixed(2)} result=${result}`);
+          debugLog("hooks/remember", `op written [${memType}] status=${op.status} conf=${op.confidence.toFixed(2)} result=${result}`);
         }
 
         const validationMsg = buildValidationRequests(validationOps);
@@ -192,7 +261,7 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
         record("hooks/remember", "hook", bytesIn, bytesOut, ms, true);
 
         await persistHookCall("remember", sessionId, projectId, {
-          agent_id:       agentId,
+          agent_id:       finalAgentId,
           ops_total:      ops.length,
           ops_direct:     directOps.length,
           ops_validation: validationOps.length,
