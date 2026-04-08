@@ -71,7 +71,7 @@ export const cfg: RuntimeConfig = {
 };
 
 /** Called at server startup after loading ServerConfig from Qdrant. */
-export function applyServerConfig(sc: ServerConfig): void {
+export function applyServerConfig(sc: ServerConfig, projectId?: string, agentId?: string): void {
   cfg.embedProvider    = sc.embed.provider as RuntimeConfig["embedProvider"];
   cfg.embedModel       = sc.embed.model;
   cfg.embedApiKey      = sc.embed.api_key;
@@ -84,6 +84,8 @@ export function applyServerConfig(sc: ServerConfig): void {
   cfg.routerConfig     = sc.router as RouterProviderSpec;
   cfg.collectionPrefix = sc.collection_prefix;
   cfg.port             = sc.port;
+  if (projectId) cfg.projectId = projectId;
+  if (agentId)   cfg.agentId   = agentId;
   // Propagate to qdrant module
   setCollectionPrefix(sc.collection_prefix);
   setEmbedDim(sc.embed.dim);

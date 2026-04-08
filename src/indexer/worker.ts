@@ -70,7 +70,7 @@ parentPort.on("message", async (msg) => {
       initQdrant(qdrant.url, qdrant.api_key);
       
       currentProjectConfig = projectConfig;
-      applyServerConfig(serverConfig);
+      applyServerConfig(serverConfig, projectConfig.project_id, projectConfig.agent_id);
       
       const wasPaused = isPaused;
       isPaused = projectConfig.indexer_state === "paused";

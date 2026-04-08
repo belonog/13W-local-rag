@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { cfg } from "../config.js";
 import { qd, colName } from "../qdrant.js";
 import { embedOne } from "../embedder.js";
-import { getProjectId, getAgentId, runWithContext } from "../request-context.js";
+import { getProjectId, getAgentId, runWithContext, requestContext } from "../request-context.js";
 
 const _dir   = dirname(fileURLToPath(import.meta.url));
 const _uiDir = resolve(_dir, "../dashboard-ui");
@@ -67,8 +67,6 @@ interface ServerInfo {
 
 let _dispatch: DispatchFn | null = null;
 let _toolSchemasJson = "[]";
-let _serverInfo: ServerInfo | null = null;
-let _serverInfoJson  = "{}";
 let _active = false;
 
 // ── In-memory state ───────────────────────────────────────────────────────────
@@ -93,6 +91,21 @@ let _reindexLastSent = 0;
 function memStats(): { rss: number; heapUsed: number; heapTotal: number; external: number } {
   const m = process.memoryUsage();
   return { rss: m.rss, heapUsed: m.heapUsed, heapTotal: m.heapTotal, external: m.external };
+}
+
+function serverInfo(): ServerInfo {
+  return {
+    projectId:            getProjectId(),
+    agentId:              getAgentId(),
+    version:              PKG_VERSION,
+    branch:               getCurrentBranch(cfg.projectRoot),
+    collectionPrefix:     cfg.collectionPrefix,
+    embedProvider:        cfg.embedProvider,
+    embedModel:           cfg.embedModel,
+    llmProvider:          cfg.llmProvider,
+    llmModel:             cfg.llmModel,
+    generateDescriptions: cfg.generateDescriptions,
+  };
 }
 
 function statsSnapshot(): Record<string, unknown> {
@@ -196,9 +209,7 @@ export function broadcastMemoryUpdate(): void {
 }
 
 export function broadcastBranchSwitch(branch: string): void {
-  if (!_active || !_serverInfo) return;
-  _serverInfo.branch = branch;
-  _serverInfoJson = JSON.stringify(_serverInfo);
+  if (!_active) return;
   const data = `data: ${JSON.stringify({ type: "branch", branch })}\n\n`;
   for (const res of new Set(sseClients)) res.write(data);
 }
@@ -315,19 +326,6 @@ export function endReindex(): void {
 export async function initDashboardState(toolSchemas: ToolSchemaDef[], dispatch: DispatchFn): Promise<void> {
   _active = true;
   _dispatch = dispatch;
-  _serverInfo = {
-    projectId:            cfg.projectId,
-    agentId:              cfg.agentId,
-    version:              PKG_VERSION,
-    branch:               getCurrentBranch(cfg.projectRoot),
-    collectionPrefix:     cfg.collectionPrefix,
-    embedProvider:        cfg.embedProvider,
-    embedModel:           cfg.embedModel,
-    llmProvider:          cfg.llmProvider,
-    llmModel:             cfg.llmModel,
-    generateDescriptions: cfg.generateDescriptions,
-  };
-  _serverInfoJson = JSON.stringify(_serverInfo);
   _toolSchemasJson = JSON.stringify(toolSchemas);
 
   // Load history from Qdrant
@@ -366,22 +364,28 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     index: false,
   });
 
-  fastify.get("/", async (_req, reply) => {
-    const html   = readFileSync(resolve(_uiDir, "index.html"), "utf8");
-    const { listProjectConfigs } = await import("../server-config.js");
-    const projects = await listProjectConfigs(qd);
+  fastify.get("/", async (req, reply) => {
+    const q         = req.query as Record<string, string>;
+    const projectId = q["project"] || "default";
+    const agentId   = q["agent"]   || projectId;
 
-    const init   = JSON.stringify({
-      stats:      statsSnapshot(),
-      log:        requestLog,
-      schemas:    JSON.parse(_toolSchemasJson) as unknown[],
-      serverInfo: JSON.parse(_serverInfoJson) as unknown,
-      memory:     memStats(),
-      projects,
+    return requestContext.run({ projectId, agentId }, async () => {
+      const html   = readFileSync(resolve(_uiDir, "index.html"), "utf8");
+      const { listProjectConfigs } = await import("../server-config.js");
+      const projects = await listProjectConfigs(qd);
+
+      const init   = JSON.stringify({
+        stats:      statsSnapshot(),
+        log:        requestLog,
+        schemas:    JSON.parse(_toolSchemasJson) as unknown[],
+        serverInfo: serverInfo(),
+        memory:     memStats(),
+        projects,
+      });
+      const inject = `<script>window.__INIT__=${init}</script>`;
+      const out    = html.replace("</head>", `${inject}\n</head>`);
+      return reply.header("Content-Type", "text/html; charset=utf-8").send(out);
     });
-    const inject = `<script>window.__INIT__=${init}</script>`;
-    const out    = html.replace("</head>", `${inject}\n</head>`);
-    return reply.header("Content-Type", "text/html; charset=utf-8").send(out);
   });
 
   fastify.get("/events", async (req, reply) => {
