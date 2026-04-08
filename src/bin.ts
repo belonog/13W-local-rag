@@ -11,6 +11,8 @@ if (cmd === "serve" || cmd === "server") {
 } else if (cmd === "migrate") {
   const { runMigrate } = await import("./migrate.js");
   await runMigrate();
+} else if (cmd === "normalize-logs") {
+  await import("./normalize-logs.js");
 } else if (cmd === "hook-recall") {
   const { runHookRecall } = await import("./hook-recall.js");
   await runHookRecall();
