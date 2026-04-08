@@ -22,14 +22,19 @@ function dotProduct(a: number[], b: number[]): number {
 }
 
 const SYNTHESIS_PROMPT = 
-  "You are a memory consolidation system for an AI agent. Your goal is to synthesize multiple similar memories into a single, high-value insight or experience entry.\\n\\n" +
-  "GOALS:\\n" +
-  "1. IDENTIFY PATTERNS: If multiple entries describe similar problems or behaviors, formulate a general rule or pattern.\\n" +
-  "2. CAPTURE OBSERVATIONS: If entries contain subtle technical nuances (e.g. env quirks, tool behavior), ensure they are preserved as 'insights'.\\n" +
-  "3. CLEANUP: Remove duplicates, outdated details, and conversational filler.\\n" +
-  "4. STAND-ALONE TEXT: The resulting text must be clear and descriptive without needing context.\\n\\n" +
-  "OUTPUT FORMAT:\\n" +
-  "Output JSON only: { \"text\": \"...\", \"status\": \"observation|resolved|in_progress\" }\\n\\n" +
+  "You are a memory consolidation system for an AI agent. Your goal is to synthesize multiple similar memories into a single, high-value insight or experience entry.\n\n" +
+  "GOALS:\n" +
+  "1. IDENTIFY PATTERNS: If multiple entries describe similar problems or behaviors, formulate a general rule or pattern.\n" +
+  "2. CAPTURE OBSERVATIONS: If entries contain subtle technical nuances, ensure they are preserved.\n" +
+  "3. CLEANUP: Remove duplicates, outdated details, and conversational filler.\n" +
+  "4. STAND-ALONE TEXT: The resulting text must be clear and descriptive.\n\n" +
+  "CRITICAL: Do NOT use placeholders like '...' or literal choices like 'observation|resolved'. Provide ACTUAL synthesized content.\n\n" +
+  "OUTPUT FORMAT:\n" +
+  "Output JSON only: { \"text\": \"Actual synthesized text here\", \"status\": \"one_of_the_statuses\" }\n" +
+  "Valid statuses: observation, resolved, in_progress\n\n" +
+  "Input memories to synthesize:\n";
+  "Output JSON only: { \"text\": \"...\", \"status\": \"observation|resolved|in_progress\" }\n\n" +
+  "Input memories to synthesize:\n";
   "Input memories to synthesize:\\n";
 
 export async function consolidateTool(a: ConsolidateArgs): Promise<string> {
@@ -115,14 +120,34 @@ export async function consolidateTool(a: ConsolidateArgs): Promise<string> {
         synthesizedText = `[Consolidated] ` + fullContents.join(" | ");
       }
 
-      if (!synthesizedText) {
+      if (!synthesizedText || synthesizedText === "...") {
         synthesizedText = `[Consolidated] ` + fullContents.join(" | ");
+      }
+      
+      // Sanitize status (ensure it's not the placeholder string)
+      if (synthesizedStatus && (synthesizedStatus.includes("|") || !["observation", "resolved", "in_progress"].includes(synthesizedStatus))) {
+        synthesizedStatus = undefined;
       }
 
       const maxImp = cluster.reduce((m, idx) => {
         const imp = Number(p(points[idx]!)["importance"] ?? 0.5);
         return Math.max(m, imp);
       }, 0);
+
+      // Find the latest session info from the cluster
+      let latestSid = "";
+      let latestStype = "headless";
+      let latestTs = "";
+      for (const idx of cluster) {
+        const pt = points[idx]!;
+        const sid = String(p(pt)["session_id"] ?? "");
+        const ts = String(p(pt)["updated_at"] ?? p(pt)["created_at"] ?? "");
+        if (ts > latestTs) {
+          latestTs = ts;
+          if (sid) latestSid = sid;
+          latestStype = String(p(pt)["session_type"] ?? "headless");
+        }
+      }
 
       // Determine the best tag/type
       const tags = cluster.flatMap(idx => {
@@ -139,6 +164,8 @@ export async function consolidateTool(a: ConsolidateArgs): Promise<string> {
         tags:       uniqueTags.join(","),
         importance: Math.min(maxImp + 0.1, 1.0),
         ttlHours:   0,
+        sessionId:  latestSid,
+        sessionType: latestStype,
       });
 
       const ids = cluster.map((idx) => String(points[idx]!.id));

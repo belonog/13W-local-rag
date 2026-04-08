@@ -33,13 +33,15 @@ export interface CodeChunkPayload {
 }
 
 export interface StoreMemoryParams {
-  content:    string;
-  memoryType: MemoryType;
-  scope:      ScopeType;
-  tags:       string;
-  importance: number;
-  ttlHours:   number;
-  status?:    Status;
+  content:     string;
+  memoryType:  MemoryType;
+  scope:       ScopeType;
+  tags:        string;
+  importance:  number;
+  ttlHours:    number;
+  status?:     Status;
+  sessionId?:  string;
+  sessionType?: string;
 }
 
 // ── New memory schema (specification.md) ──────────────────────────────────────

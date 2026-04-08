@@ -143,6 +143,7 @@ export class MemoryComponent implements OnInit {
   statusClass(status: string): string {
     switch (status) {
       case "resolved":      return "text-(--color-ok)    bg-(--color-ok)/10    border-(--color-ok)/30";
+      case "observation":   return "text-(--color-indigo) bg-(--color-indigo)/10 border-(--color-indigo)/30";
       case "in_progress":   return "text-(--color-amber)  bg-(--color-amber)/10  border-(--color-amber)/30";
       case "open_question": return "text-(--color-err)    bg-(--color-err)/10    border-(--color-err)/30";
       case "hypothesis":    return "text-(--color-sky)    bg-(--color-sky)/10    border-(--color-sky)/30";
@@ -165,6 +166,7 @@ export class MemoryComponent implements OnInit {
       case "open_question": return "open_question";
       case "hypothesis":    return "hypothesis";
       case "resolved":      return "resolved";
+      case "observation":   return "observation";
       default:              return status;
     }
   }
@@ -193,5 +195,5 @@ export class MemoryComponent implements OnInit {
     return `${Math.round(score * 100)}%`;
   }
 
-  readonly statusOrder = ["in_progress", "open_question", "hypothesis", "resolved"];
+  readonly statusOrder = ["in_progress", "open_question", "hypothesis", "observation", "resolved"];
 }

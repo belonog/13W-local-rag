@@ -24,7 +24,7 @@ export function nowIso(): string {
 }
 
 export async function storeMemory(params: StoreMemoryParams): Promise<string> {
-  const { content, memoryType, scope, tags, importance, ttlHours, status } = params;
+  const { content, memoryType, scope, tags, importance, ttlHours, status, sessionId, sessionType } = params;
 
   if (!["episodic", "semantic", "procedural"].includes(memoryType)) {
     return "error: memory_type must be: episodic, semantic, procedural";
@@ -74,6 +74,8 @@ export async function storeMemory(params: StoreMemoryParams): Promise<string> {
           access_count: 0,
           tags:         tagList,
           content_hash: hash,
+          session_id:   sessionId ?? "",
+          session_type: sessionType ?? "unknown",
           created_at:   now,
           updated_at:   now,
           expires_at:   expiresAt,

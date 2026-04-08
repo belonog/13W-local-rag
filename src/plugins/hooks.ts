@@ -170,11 +170,14 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
         for (const op of directOps) {
           const result = await storeMemory({
             content:    op.text,
+            status:     op.status,
             memoryType: "episodic",
             scope:      "project",
             tags:       "",
             importance: op.confidence,
             ttlHours:   0,
+            sessionId:  sessionId,
+            sessionType: "editing", // Default for direct ops from transcript
           });
           debugLog("hooks/remember", `op written status=${op.status} conf=${op.confidence.toFixed(2)} result=${result}`);
         }
