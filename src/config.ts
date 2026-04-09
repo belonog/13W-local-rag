@@ -27,6 +27,7 @@ interface RuntimeConfig {
   embedApiKey:          string;
   embedDim:             number;
   embedUrl:             string;
+  embedMaxChars:        number;
   embedTimeout:         number;
   embedMaxAttempts:     number;
   ollamaUrl:            string;
@@ -58,6 +59,7 @@ export const cfg: RuntimeConfig = {
   embedApiKey:          "",
   embedDim:             768,
   embedUrl:             "",
+  embedMaxChars:        3000,
   embedTimeout:         120,
   embedMaxAttempts:     3,
   ollamaUrl:            "http://localhost:11434",
@@ -87,6 +89,7 @@ export function applyServerConfig(sc: ServerConfig, projectId?: string, agentId?
   cfg.embedApiKey      = sc.embed.api_key;
   cfg.embedDim         = sc.embed.dim;
   cfg.embedUrl         = sc.embed.url;
+  cfg.embedMaxChars    = sc.embed.max_chars;
   cfg.embedTimeout     = sc.embed.timeout;
   cfg.embedMaxAttempts = sc.embed.max_attempts;
   cfg.llmProvider      = sc.llm.provider as RuntimeConfig["llmProvider"];

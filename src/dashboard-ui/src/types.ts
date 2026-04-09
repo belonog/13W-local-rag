@@ -95,11 +95,12 @@ export interface InitData {
 }
 
 export interface EmbedConfigData {
-  provider: string;
-  model:    string;
-  api_key:  string;
-  dim:      number;
-  url:      string;
+  provider:  string;
+  model:     string;
+  api_key:   string;
+  dim:       number;
+  url:       string;
+  max_chars: number;
 }
 
 export interface LlmConfigData {

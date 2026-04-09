@@ -489,6 +489,40 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     });
   });
 
+  fastify.get("/api/config/server", async () => {
+    const { loadServerConfig } = await import("../server-config.js");
+    return loadServerConfig(qd);
+  });
+
+  fastify.put<{ Body: Partial<import("../server-config.js").ServerConfig> }>("/api/config/server", async (req, reply) => {
+    const { loadServerConfig, saveServerConfig, mergeServerConfig } = await import("../server-config.js");
+    const { applyServerConfig } = await import("../config.js");
+    const current = await loadServerConfig(qd);
+    const updated = mergeServerConfig({ ...current, ...req.body, embed: { ...current.embed, ...(req.body.embed ?? {}) }, llm: { ...current.llm, ...(req.body.llm ?? {}) }, router: { ...current.router, ...(req.body.router ?? {}) } });
+    await saveServerConfig(qd, updated);
+    applyServerConfig(updated);
+    return reply.send({ ok: true });
+  });
+
+  fastify.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async (req, reply) => {
+    const { loadProjectConfig } = await import("../server-config.js");
+    const project = await loadProjectConfig(qd, req.params.projectId);
+    if (!project) return reply.code(404).send({ error: "Project not found" });
+    return project;
+  });
+
+  fastify.put<{ Params: { projectId: string }; Body: Partial<ProjectConfig> }>("/api/projects/:projectId", async (req, reply) => {
+    const { mergeProjectConfig, upsertProjectConfig } = await import("../server-config.js");
+    const updated = mergeProjectConfig({ ...req.body, project_id: req.params.projectId });
+    await upsertProjectConfig(qd, updated);
+    return reply.send({ ok: true });
+  });
+
+  fastify.get("/api/projects", async () => {
+    const { listProjectConfigs } = await import("../server-config.js");
+    return listProjectConfigs(qd);
+  });
+
   fastify.post<{ Body: Partial<ProjectConfig> & { project_id: string } }>("/api/projects", async (req, reply) => {
     const body = req.body;
     if (!body.project_id) return reply.code(400).send({ error: "Missing project_id" });

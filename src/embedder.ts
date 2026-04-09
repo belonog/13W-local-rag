@@ -1,8 +1,6 @@
 import { cfg } from "./config.js";
 import { callLlmSimple, defaultRouterSpec } from "./llm-client.js";
 
-const MAX_CHARS = 3000;
-
 // ── Embedding ──────────────────────────────────────────────────────────────────
 
 function resolveEmbedUrl(): string {
@@ -74,7 +72,7 @@ function embedBatchAttempt(texts: string[], attempt: number): Promise<number[][]
 
 export async function embedBatch(texts: string[]): Promise<number[][]> {
   const truncated = texts.map((t) =>
-    t.length > MAX_CHARS ? t.slice(0, MAX_CHARS) : t
+    t.length > cfg.embedMaxChars ? t.slice(0, cfg.embedMaxChars) : t
   );
   return embedBatchAttempt(truncated, 0);
 }

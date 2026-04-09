@@ -36,6 +36,12 @@ import type { ServerConfigData, ProjectConfigData } from "../../types";
               type="number" [value]="serverCfg()!.embed.dim"
               (input)="patchEmbed('dim', +$any($event.target).value)" />
           </label>
+          <label class="flex gap-2 items-center text-xs">
+            <span class="w-28 text-(--color-muted)">Max chars</span>
+            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
+              type="number" [value]="serverCfg()!.embed.max_chars"
+              (input)="patchEmbed('max_chars', +$any($event.target).value)" />
+          </label>
 
           <h3 class="text-xs font-semibold text-(--color-muted) uppercase tracking-wider mt-2">LLM</h3>
           <label class="flex gap-2 items-center text-xs">

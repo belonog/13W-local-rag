@@ -18,6 +18,7 @@ export interface EmbedConfig {
   api_key:      string;
   dim:          number;
   url:          string;
+  max_chars:    number;
   timeout:      number;
   max_attempts: number;
 }
@@ -53,7 +54,7 @@ const DEFAULT_LLM: LlmProviderConfig = {
 
 const DEFAULT_EMBED: EmbedConfig = {
   provider: "ollama", model: "embeddinggemma:300m", api_key: "", dim: 768, url: "",
-  timeout: 120, max_attempts: 3,
+  max_chars: 3000, timeout: 120, max_attempts: 3,
 };
 
 export function mergeServerConfig(raw: Partial<ServerConfig>): ServerConfig {
