@@ -136,7 +136,7 @@
         <h2 class="text-[0.9rem] font-semibold uppercase tracking-[0.07em] text-(--color-indigo)
                     mt-4 mb-1.5 pb-1 border-b border-(--color-border) shrink-0">Tool Stats</h2>
         <div class="overflow-y-auto max-h-[30vh] shrink-0 border border-(--color-border) rounded-[4px]">
-          <app-stats-table [stats]="sse.stats()" />
+          <app-stats-table [stats]="filteredStats()" />
         </div>
 
         <h2 class="text-[0.9rem] font-semibold uppercase tracking-[0.07em] text-(--color-indigo)
@@ -147,7 +147,7 @@
           </span>
         </h2>
         <div class="flex-1 min-h-0">
-          <app-request-log [entries]="sse.log()" />
+          <app-request-log [entries]="filteredLog()" />
         </div>
 
       </div>

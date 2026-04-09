@@ -19,7 +19,7 @@ export async function init(): Promise<void> {
     const serverUrl  = process.env["MEMORY_SERVER_URL"] ?? `http://127.0.0.1:${port}`;
 
     // 2. Verify server is running
-    const health = await fetch(`${serverUrl}/api/stats`).catch(() => null);
+    const health = await fetch(`${serverUrl}/api/init`).catch(() => null);
     if (!health?.ok) {
       process.stderr.write(`[init] ERROR: Server not running at ${serverUrl}. Run 'local-rag serve' first.\n`);
       process.exit(1);

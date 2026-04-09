@@ -513,8 +513,12 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
 
   fastify.put<{ Params: { projectId: string }; Body: Partial<ProjectConfig> }>("/api/projects/:projectId", async (req, reply) => {
     const { mergeProjectConfig, upsertProjectConfig } = await import("../server-config.js");
+    const { IndexerManager } = await import("../indexer/manager.js");
+    const { readLocalConfig, defaultLocalConfigPath } = await import("../local-config.js");
     const updated = mergeProjectConfig({ ...req.body, project_id: req.params.projectId });
     await upsertProjectConfig(qd, updated);
+    const localConfig = await readLocalConfig(defaultLocalConfigPath());
+    await IndexerManager.syncProject(updated, localConfig);
     return reply.send({ ok: true });
   });
 

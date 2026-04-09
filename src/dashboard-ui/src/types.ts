@@ -9,16 +9,18 @@ export interface ToolStats {
 }
 
 export interface RequestEntry {
-  ts:       number;
-  tool:     string;
-  source:   "mcp" | "playground" | "watcher";
-  bytesIn:  number;
-  bytesOut: number;
-  ms:       number;
-  ok:       boolean;
-  chunks?:  number;
-  file?:    string;
-  error?:   string;
+  ts:        number;
+  tool:      string;
+  source:    "mcp" | "playground" | "watcher" | "hook";
+  projectId?: string;
+  agentId?:   string;
+  bytesIn:   number;
+  bytesOut:  number;
+  ms:        number;
+  ok:        boolean;
+  chunks?:   number;
+  file?:     string;
+  error?:    string;
 }
 
 export interface PropSchema {
