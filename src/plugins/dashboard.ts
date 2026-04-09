@@ -93,9 +93,9 @@ export function record(
   for (const res of new Set(sseClients)) res.write(data);
 }
 
-export function recordIndex(projectId: string, relPath: string, chunks: number, ms: number, ok: boolean): void {
+export function recordIndex(projectId: string, relPath: string, chunks: number, ms: number, ok: boolean, error?: string): void {
   if (!_active) return;
-  const entry: RequestEntry = { ts: Date.now(), tool: "indexer", file: relPath, source: "watcher", projectId, agentId: "indexer", bytesIn: 0, bytesOut: 0, ms, ok, chunks };
+  const entry: RequestEntry = { ts: Date.now(), tool: "indexer", file: relPath, source: "watcher", projectId, agentId: "indexer", bytesIn: 0, bytesOut: 0, ms, ok, chunks, error };
   updateStats(entry);
   requestLog.push(entry);
   if (requestLog.length > LOG_MAX) requestLog.shift();

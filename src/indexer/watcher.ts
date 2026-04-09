@@ -37,7 +37,7 @@ function buildGitignoreFilter(root: string): GitignoreFilter {
 export interface WatcherOptions {
   ignoreInitial?: boolean;
   onReindex?: (relPath: string, chunks: number) => void;
-  onRecordIndex?: (relPath: string, chunks: number, ms: number, ok: boolean) => void;
+  onRecordIndex?: (relPath: string, chunks: number, ms: number, ok: boolean, error?: string) => void;
   onReady?: () => void;
   getState?: () => "running" | "paused" | "stopped";
   enqueueEvent?: (absPath: string) => void;
@@ -68,9 +68,9 @@ export function startWatcher(
     awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
   });
 
-  const doRecord = (relPath: string, chunks: number, ms: number, ok: boolean) => {
-    if (options?.onRecordIndex) options.onRecordIndex(relPath, chunks, ms, ok);
-    else recordIndex(indexer.projectId, relPath, chunks, ms, ok);
+  const doRecord = (relPath: string, chunks: number, ms: number, ok: boolean, error?: string) => {
+    if (options?.onRecordIndex) options.onRecordIndex(relPath, chunks, ms, ok, error);
+    else recordIndex(indexer.projectId, relPath, chunks, ms, ok, error);
   };
 
   const pendingEvents = new Map<string, ReturnType<typeof setTimeout>>();
@@ -106,7 +106,7 @@ export function startWatcher(
           })
           .catch((err: unknown) => {
             process.stderr.write(`[watcher] error ${relPath}: ${String(err)}\n`);
-            doRecord(relPath, 0, Date.now() - t0, false);
+            doRecord(relPath, 0, Date.now() - t0, false, String(err));
           });
       } else {
         const t1 = Date.now();
@@ -118,7 +118,7 @@ export function startWatcher(
           })
           .catch((err: unknown) => {
             process.stderr.write(`[watcher] delete error ${relPath}: ${String(err)}\n`);
-            doRecord(relPath, 0, Date.now() - t1, false);
+            doRecord(relPath, 0, Date.now() - t1, false, String(err));
           });
       }
     }, 100);

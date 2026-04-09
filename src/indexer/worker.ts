@@ -109,8 +109,8 @@ parentPort.on("message", async (msg) => {
             watcherQueue.add(absPath);
             if (!isPaused) processQueue();
           },
-          onRecordIndex: (relPath, chunks, ms, ok) => {
-            parentPort!.postMessage({ type: "recordIndex", relPath, chunks, ms, ok });
+          onRecordIndex: (relPath, chunks, ms, ok, error) => {
+            parentPort!.postMessage({ type: "recordIndex", relPath, chunks, ms, ok, error });
           },
         });
         

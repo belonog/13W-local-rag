@@ -26,7 +26,7 @@ export class IndexerManager {
       
       worker.on("message", (msg) => {
         if (msg.type === "recordIndex") {
-          recordIndex(project.project_id, msg.relPath, msg.chunks, msg.ms, msg.ok);
+          recordIndex(project.project_id, msg.relPath, msg.chunks, msg.ms, msg.ok, msg.error);
         } else if (msg.type === "progress") {
           if (msg.done === 1 && msg.total > 1) startReindex(msg.total);
           tickReindex(msg.done, msg.chunks);
