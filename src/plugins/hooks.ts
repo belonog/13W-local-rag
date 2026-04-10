@@ -26,6 +26,7 @@ import {
   type JsonLine,
 } from "../util.js";
 import { record } from "./dashboard.js";
+import { setSession }            from "../session-store.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -48,7 +49,7 @@ interface HookBody {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function persistHookCall(
-  hookType: "recall" | "remember",
+  hookType: "recall" | "remember" | "session-end",
   sessionId: string,
   projectId: string,
   extraPayload: Record<string, unknown> = {},
@@ -128,6 +129,28 @@ function detectSessionType(body: HookBody, lines: JsonLine[]): SessionDetection 
   }
 
   return { type: "planning", threshold: 0.75 };
+}
+
+function buildSessionEndMessage(sessionId: string): string {
+  return [
+    "## Session complete — please give feedback on MCP tools",
+    "",
+    `**Session ID:** ${sessionId}`,
+    "",
+    "Call `give_feedback` with your honest assessment of this session:",
+    "",
+    "```",
+    `give_feedback(content="...", session_id="${sessionId}")`,
+    "```",
+    "",
+    "Suggested topics (write freely, no format required):",
+    "- Which MCP tools did you use, and were they helpful?",
+    "- Did you read and act on context injected by `UserPromptSubmit` or `SessionStart` hooks?",
+    "  Or did you start from scratch and ignore it? Why?",
+    "- Were there moments where prior memory (`recall`/`search_code`) saved steps,",
+    "  or where you wished you had more context?",
+    "- What would make the system more useful in future sessions?",
+  ].join("\n");
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -274,6 +297,40 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
         debugLog("hooks/remember", `error: ${String(err)}`);
         return reply.code(500).send({ error: String(err) });
       }
+    });
+  });
+
+  // ── POST /hooks/session-end ──────────────────────────────────────────────────
+
+  fastify.post<{ Body: HookBody; Querystring: { project?: string; agent?: string; agent_type?: string } }>("/hooks/session-end", async (req, reply) => {
+    const t0        = Date.now();
+    const body      = req.body ?? {} as HookBody;
+    const bytesIn   = JSON.stringify(body).length;
+    const projectId = req.query.project    || "default";
+    const agentId   = req.query.agent      || projectId;
+    const agentType = req.query.agent_type || "unknown";
+
+    const sessionId = body.session_id ?? "unknown";
+
+    return runWithContext({ projectId, agentId }, async () => {
+      debugLog("hooks/session-end", `session=${sessionId} agent_type=${agentType}`);
+
+      // Store session_id so give_feedback tool can use it as fallback
+      setSession(projectId, agentId, sessionId);
+
+      const systemMessage = buildSessionEndMessage(sessionId);
+
+      const ms       = Date.now() - t0;
+      const bytesOut = JSON.stringify({ systemMessage }).length;
+      record("hooks/session-end", "hook", bytesIn, bytesOut, ms, true);
+
+      await persistHookCall("session-end", sessionId, projectId, {
+        agent_id:   agentId,
+        agent_type: agentType,
+        hook_event: body.hook_event_name ?? "SessionEnd",
+      });
+
+      return reply.send({ systemMessage });
     });
   });
 }
