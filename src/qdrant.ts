@@ -21,6 +21,7 @@ export const COLLECTIONS = [
   "memory",
   "memory_agents",
   "code_chunks",
+  "feedback",
 ] as const;
 
 /** Prepend the configured collection prefix (if any) to a base collection name. */
@@ -142,6 +143,21 @@ export async function ensureCollections(): Promise<void> {
 
   await ensureNewMemoryCollections(existing);
   await ensureCodeChunks();
+
+  // feedback — session-end feedback from AI about MCP tool usefulness
+  if (!existing.has(colName("feedback"))) {
+    await qd.createCollection(colName("feedback"), {
+      vectors: { size: _embedDim, distance: "Cosine" },
+    });
+    for (const field of ["project_id", "agent_id", "agent_type", "session_id"]) {
+      await qd.createPayloadIndex(colName("feedback"), {
+        field_name:   field,
+        field_schema: "keyword",
+        wait:         true,
+      });
+    }
+    process.stderr.write(`[qdrant] Created collection: ${colName("feedback")}\n`);
+  }
 
   // request_logs — payload-only collection (vector size 1, dummy float)
   if (!existing.has(colName("request_logs"))) {
