@@ -117,6 +117,7 @@ export interface ServerConfigData {
   embed:             EmbedConfigData;
   llm:               LlmConfigData;
   router:            LlmConfigData;
+  rate_limits:       Record<string, { size: number; window: number }>;
   collection_prefix: string;
   port:              number;
   updated_at:        string;

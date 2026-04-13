@@ -25,6 +25,9 @@ if (cmd === "serve" || cmd === "server") {
 } else if (cmd === "hook-session-end") {
   const { runHookSessionEnd } = await import("./hook-session-end.js");
   await runHookSessionEnd();
+} else if (cmd === "re-embed") {
+  const { runReEmbed } = await import("./re-embed.js");
+  await runReEmbed();
 } else {
   await import("./indexer/cli.js");
 }

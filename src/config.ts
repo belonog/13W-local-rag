@@ -1,6 +1,7 @@
 import type { ServerConfig } from "./server-config.js";
 import { getProjectId, getAgentId } from "./request-context.js";
 import { setCollectionPrefix, setEmbedDim } from "./qdrant.js";
+import { applyRateLimits } from "./llm-client.js";
 
 // Re-export for backward compat — tools can import these from config.js
 export { getProjectId, getAgentId };
@@ -22,7 +23,7 @@ export interface RouterProviderSpec {
 
 interface RuntimeConfig {
   qdrantUrl:            string;
-  embedProvider:        "ollama" | "openai" | "voyage";
+  embedProvider:        "ollama" | "openai" | "voyage" | "gemini";
   embedModel:           string;
   embedApiKey:          string;
   embedDim:             number;
@@ -106,6 +107,8 @@ export function applyServerConfig(sc: ServerConfig, projectId?: string, agentId?
   // Propagate to qdrant module
   setCollectionPrefix(sc.collection_prefix);
   setEmbedDim(sc.embed.dim);
+  // Apply per-model rate limits
+  applyRateLimits(sc.rate_limits ?? {});
 }
 
 /** Mutable current branch — updated by watcher on branch switch. */

@@ -2,6 +2,11 @@ import type { QdrantClient } from "@qdrant/js-client-rest";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export interface RateLimitConfig {
+  size:   number;  // max requests per window
+  window: number;  // window duration in seconds
+}
+
 export interface LlmProviderConfig {
   provider:     "ollama" | "anthropic" | "openai" | "gemini";
   model:        string;
@@ -13,7 +18,7 @@ export interface LlmProviderConfig {
 }
 
 export interface EmbedConfig {
-  provider:     "ollama" | "openai" | "voyage";
+  provider:     "ollama" | "openai" | "voyage" | "gemini";
   model:        string;
   api_key:      string;
   dim:          number;
@@ -27,6 +32,7 @@ export interface ServerConfig {
   embed:             EmbedConfig;
   llm:               LlmProviderConfig;
   router:            LlmProviderConfig;
+  rate_limits:       Record<string, RateLimitConfig>;
   collection_prefix: string;
   port:              number;
   updated_at:        string;
@@ -62,6 +68,7 @@ export function mergeServerConfig(raw: Partial<ServerConfig>): ServerConfig {
     embed:             { ...DEFAULT_EMBED,  ...(raw.embed  ?? {}) },
     llm:               { ...DEFAULT_LLM,   ...(raw.llm    ?? {}) },
     router:            { ...DEFAULT_LLM,   ...(raw.router ?? {}) },
+    rate_limits:       raw.rate_limits       ?? {},
     collection_prefix: raw.collection_prefix ?? "",
     port:              raw.port ?? 7531,
     updated_at:        raw.updated_at ?? new Date().toISOString(),

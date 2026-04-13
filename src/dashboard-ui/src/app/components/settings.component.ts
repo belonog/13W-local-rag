@@ -1,6 +1,6 @@
-import { Component, OnInit, signal } from "@angular/core";
-import { CommonModule }              from "@angular/common";
-import type { ServerConfigData, ProjectConfigData } from "../../types";
+import { Component, effect, input, signal } from "@angular/core";
+import { CommonModule }                     from "@angular/common";
+import type { ProjectConfigData } from "../../types";
 
 @Component({
   selector: "app-settings",
@@ -8,101 +8,6 @@ import type { ServerConfigData, ProjectConfigData } from "../../types";
   imports: [CommonModule],
   template: `
     <div class="settings overflow-y-auto h-full p-4">
-      <h2 class="text-[0.9rem] font-semibold uppercase tracking-[0.07em] text-(--color-indigo) mb-3">Server Settings</h2>
-      @if (serverCfg()) {
-        <div class="flex flex-col gap-2 mb-6">
-          <h3 class="text-xs font-semibold text-(--color-muted) uppercase tracking-wider mt-2">Embed</h3>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Provider</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              [value]="serverCfg()!.embed.provider"
-              (input)="patchEmbed('provider', $any($event.target).value)" />
-          </label>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Model</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              [value]="serverCfg()!.embed.model"
-              (input)="patchEmbed('model', $any($event.target).value)" />
-          </label>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">API Key</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              type="password" [value]="serverCfg()!.embed.api_key"
-              (input)="patchEmbed('api_key', $any($event.target).value)" />
-          </label>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Dim</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              type="number" [value]="serverCfg()!.embed.dim"
-              (input)="patchEmbed('dim', +$any($event.target).value)" />
-          </label>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Max chars</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              type="number" [value]="serverCfg()!.embed.max_chars"
-              (input)="patchEmbed('max_chars', +$any($event.target).value)" />
-          </label>
-
-          <h3 class="text-xs font-semibold text-(--color-muted) uppercase tracking-wider mt-2">LLM</h3>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Provider</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              [value]="serverCfg()!.llm.provider"
-              (input)="patchLlm('provider', $any($event.target).value)" />
-          </label>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Model</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              [value]="serverCfg()!.llm.model"
-              (input)="patchLlm('model', $any($event.target).value)" />
-          </label>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">API Key</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              type="password" [value]="serverCfg()!.llm.api_key"
-              (input)="patchLlm('api_key', $any($event.target).value)" />
-          </label>
-
-          <h3 class="text-xs font-semibold text-(--color-muted) uppercase tracking-wider mt-2">Router</h3>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Provider</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              [value]="serverCfg()!.router.provider"
-              (input)="patchRouter('provider', $any($event.target).value)" />
-          </label>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Model</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              [value]="serverCfg()!.router.model"
-              (input)="patchRouter('model', $any($event.target).value)" />
-          </label>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">API Key</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              type="password" [value]="serverCfg()!.router.api_key"
-              (input)="patchRouter('api_key', $any($event.target).value)" />
-          </label>
-
-          <h3 class="text-xs font-semibold text-(--color-muted) uppercase tracking-wider mt-2">General</h3>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Collection prefix</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              [value]="serverCfg()!.collection_prefix"
-              (input)="patchServer('collection_prefix', $any($event.target).value)" />
-          </label>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Port (restart)</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              type="number" [value]="serverCfg()!.port"
-              (input)="patchServer('port', +$any($event.target).value)" />
-          </label>
-
-          <button
-            class="mt-2 self-start px-3 py-1 text-xs font-mono bg-(--color-indigo) text-white rounded cursor-pointer border-none"
-            (click)="saveServer()">Save Server Settings</button>
-        </div>
-      }
-
       <h2 class="text-[0.9rem] font-semibold uppercase tracking-[0.07em] text-(--color-indigo) mb-3">Project Settings</h2>
       @if (projectCfg()) {
         <div class="flex flex-col gap-2 mb-6">
@@ -156,40 +61,18 @@ import type { ServerConfigData, ProjectConfigData } from "../../types";
     </div>
   `,
 })
-export class SettingsComponent implements OnInit {
-  readonly serverCfg  = signal<ServerConfigData | null>(null);
+export class SettingsComponent {
+  readonly projectId  = input<string>("");
   readonly projectCfg = signal<ProjectConfigData | null>(null);
   readonly saved      = signal(false);
 
-  ngOnInit(): void {
-    void fetch("/api/config/server")
-      .then(r => r.json() as Promise<ServerConfigData>)
-      .then(d => this.serverCfg.set(d));
-
-    const projectId = new URLSearchParams(window.location.search).get("project") ?? "default";
-    void fetch(`/api/projects/${projectId}`)
-      .then(r => r.ok ? r.json() as Promise<ProjectConfigData> : null)
-      .then(d => { if (d) this.projectCfg.set(d); });
-  }
-
-  patchServer(key: keyof ServerConfigData, value: unknown): void {
-    const cur = this.serverCfg();
-    if (cur) this.serverCfg.set({ ...cur, [key]: value });
-  }
-
-  patchEmbed(key: string, value: unknown): void {
-    const cur = this.serverCfg();
-    if (cur) this.serverCfg.set({ ...cur, embed: { ...cur.embed, [key]: value } });
-  }
-
-  patchLlm(key: string, value: unknown): void {
-    const cur = this.serverCfg();
-    if (cur) this.serverCfg.set({ ...cur, llm: { ...cur.llm, [key]: value } });
-  }
-
-  patchRouter(key: string, value: unknown): void {
-    const cur = this.serverCfg();
-    if (cur) this.serverCfg.set({ ...cur, router: { ...cur.router, [key]: value } });
+  constructor() {
+    effect(() => {
+      const pid = this.projectId() || new URLSearchParams(window.location.search).get("project") || "default";
+      void fetch(`/api/projects/${pid}`)
+        .then(r => r.ok ? r.json() as Promise<ProjectConfigData> : null)
+        .then(d => { this.projectCfg.set(d); });
+    });
   }
 
   patchProject(key: keyof ProjectConfigData, value: unknown): void {
@@ -199,14 +82,6 @@ export class SettingsComponent implements OnInit {
 
   onIncludePathsInput(value: string): void {
     this.patchProject("include_paths", value.split("\n").map(s => s.trim()).filter(Boolean));
-  }
-
-  saveServer(): void {
-    void fetch("/api/config/server", {
-      method:  "PUT",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(this.serverCfg()),
-    }).then(() => this.flash());
   }
 
   saveProject(): void {

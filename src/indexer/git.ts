@@ -49,6 +49,21 @@ export function getCurrentBranch(root: string): string {
 }
 
 /**
+ * Returns true only if HEAD points to a named branch (ref: refs/heads/...).
+ * Returns false for detached HEAD (rebase in progress, git bisect, bare SHA checkout).
+ */
+export function isNamedBranch(root: string): boolean {
+  const gitDir = findGitDir(root);
+  if (!gitDir) return false;
+  try {
+    const head = readFileSync(join(gitDir, "HEAD"), "utf8").trim();
+    return /^ref:\s*refs\/heads\/.+$/.test(head);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Read current commit SHA from .git/refs or packed-refs.
  * Returns null if not a git repo or unresolvable.
  */

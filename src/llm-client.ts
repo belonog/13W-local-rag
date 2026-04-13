@@ -4,14 +4,57 @@
  */
 
 import { cfg, type RouterProviderSpec } from "./config.js";
+import { Queue } from "./queue.js";
 
 const MAX_TOKENS = 1024;
 
-// Rate limiting & Retry state
-let _pausedUntil = 0;
-const CONCURRENCY_LIMIT = 5;
-let _activeCalls = 0;
-const _queue: Array<() => void> = [];
+// ── Per-model rate-limit queues ───────────────────────────────────────────────
+
+const _queues = new Map<string, Queue>();
+
+/** Return the queue for a model, creating a default one (120 req / 60 s) if absent. */
+function _getQueue(model: string): Queue {
+  let q = _queues.get(model);
+  if (!q) {
+    q = new Queue(120, 60);
+    _queues.set(model, q);
+  }
+  return q;
+}
+
+/**
+ * Apply rate-limit config from ServerConfig.
+ * Called by applyServerConfig() whenever settings are saved.
+ * Replaces (or creates) the queue for each configured model.
+ */
+export function applyRateLimits(limits: Record<string, { size: number; window: number }>): void {
+  for (const [model, lim] of Object.entries(limits)) {
+    _queues.set(model, new Queue(lim.size, lim.window));
+  }
+}
+
+// Periodic trim: keeps timestamp arrays clean during idle periods.
+// Array size is already bounded to `size` entries, but this ensures
+// expired entries are released even when acquire() is not being called.
+setInterval(() => { for (const q of _queues.values()) q.trim(); }, 10_000).unref();
+
+// ── Per-model serializer ──────────────────────────────────────────────────────
+// Ensures only 1 LLM request is in-flight per model at a time.
+// Without this, Promise.all in batchGenerateDescriptions fires DESC_CONCURRENCY
+// concurrent requests that all pass the sliding-window queue simultaneously,
+// causing multiple 429 responses and multiple identical log messages.
+
+const _serializers = new Map<string, Promise<unknown>>();
+
+/** Chain onto the tail of the per-model promise queue. Returns [wait, release]. */
+function _acquireSerial(model: string): [Promise<void>, () => void] {
+  let release!: () => void;
+  const slot = new Promise<void>((r) => { release = r; });
+  const prev = _serializers.get(model) ?? Promise.resolve();
+  // Successors will wait on slot, which we release in finally.
+  _serializers.set(model, prev.then(() => slot));
+  return [prev as Promise<void>, release];
+}
 
 /** Internal fetch wrapper to add context to errors (especially timeouts). */
 async function _fetchWithLogging(url: string, options: RequestInit, model: string): Promise<Response> {
@@ -27,44 +70,29 @@ async function _fetchWithLogging(url: string, options: RequestInit, model: strin
   }
 }
 
-async function _acquireSlot(): Promise<void> {
-  while (_activeCalls >= CONCURRENCY_LIMIT || Date.now() < _pausedUntil) {
-    if (Date.now() < _pausedUntil) {
-      await new Promise(r => setTimeout(r, Math.max(1000, _pausedUntil - Date.now())));
-    } else {
-      await new Promise<void>(r => _queue.push(r));
-    }
-  }
-  _activeCalls++;
-}
-
-function _releaseSlot(): void {
-  _activeCalls--;
-  const next = _queue.shift();
-  if (next) next();
-}
-
-async function _withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
-  for (let i = 0; i < attempts; i++) {
-    await _acquireSlot();
-    try {
-      return await fn();
-    } catch (err: unknown) {
-      const msg = String(err);
-      if (msg.includes("429") || msg.toLowerCase().includes("too many requests")) {
-        process.stderr.write(`[llm-client] hit rate limit (429), pausing for 60s (attempt ${i + 1}/${attempts})\n`);
-        _pausedUntil = Date.now() + 60_000;
-        if (i < attempts - 1) {
-          _releaseSlot();
-          continue;
+async function _withRetry<T>(fn: () => Promise<T>, model: string, attempts = 3): Promise<T> {
+  const queue = _getQueue(model);
+  const [wait, release] = _acquireSerial(model);
+  await wait; // block until the previous request for this model finishes
+  try {
+    for (let i = 0; i < attempts; i++) {
+      await queue.acquire();
+      try {
+        return await fn();
+      } catch (err: unknown) {
+        const msg = String(err);
+        if (msg.includes("429") || msg.toLowerCase().includes("too many requests")) {
+          process.stderr.write(`[llm-client] hit rate limit (429) for model=${model}, pausing 60s (attempt ${i + 1}/${attempts})\n`);
+          queue.pause(60_000);
+          if (i < attempts - 1) continue;
         }
+        throw err;
       }
-      throw err;
-    } finally {
-      _releaseSlot();
     }
+    throw new Error("Max retries exceeded");
+  } finally {
+    release(); // unblock the next request for this model
   }
-  throw new Error("Max retries exceeded");
 }
 
 // ── Shared types ──────────────────────────────────────────────────────────────
@@ -130,7 +158,7 @@ export async function callLlmSimple(
       case "gemini":    return _callGeminiSimple(prompt, spec.model, apiKey, baseUrl, timeout, spec.max_tokens);
       default:          return _callOllamaSimple(prompt, spec.model, baseUrl, timeout);
     }
-  }, attempts);
+  }, spec.model, attempts);
 }
 
 async function _callOllamaSimple(prompt: string, model: string, baseUrl: string, timeout: number): Promise<string> {
@@ -206,7 +234,7 @@ export async function callLlmWithTools(
       case "gemini":    return _callGeminiWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, apiKey, baseUrl, timeout);
       default:          return _callOllamaWithTools(userMessage, systemPrompt, tools, toolExecutor, spec.model, baseUrl, timeout);
     }
-  }, attempts);
+  }, spec.model, attempts);
 }
 
 // ── Ollama tool calling ───────────────────────────────────────────────────────
@@ -438,7 +466,7 @@ export async function callLlmTool(
       case "gemini":    return _callGeminiTool(prompt, tool, spec.model, apiKey, baseUrl, timeout);
       default:          return _callOllamaTool(prompt, tool, spec.model, baseUrl, timeout);
     }
-  }, attempts);
+  }, spec.model, attempts);
 }
 
 async function _callOllamaTool(prompt: string, tool: ToolDef, model: string, baseUrl: string, timeout: number): Promise<Record<string, unknown> | null> {

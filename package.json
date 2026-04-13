@@ -36,6 +36,7 @@
     "start": "node dist/bin.js serve",
     "index": "node dist/bin.js index",
     "watch": "node dist/bin.js watch",
+    "re-embed": "node dist/bin.js re-embed",
     "test": "vitest run",
     "test:watch": "vitest",
     "bench:build": "tsc -p tsconfig.bench.json",
@@ -46,6 +47,7 @@
   },
   "dependencies": {
     "@fastify/static": "^9.0.0",
+    "@google/gemini-cli": "0.39.0-nightly.20260411.0957f7d3e",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@qdrant/js-client-rest": "^1.17.0",
     "chokidar": "^5.0.0",

@@ -13,11 +13,7 @@ import {
 } from "../storage.js";
 import type { CodeChunk } from "../types.js";
 import { qd, CODE_VECTORS, colName } from "../qdrant.js";
-import {
-  loadManifest,
-  saveManifest,
-  type FileManifest,
-} from "./git.js";
+import { type FileManifest } from "./git.js";
 
 const BATCH_SIZE  = 32;
 const DESC_CONCURRENCY = 5;
@@ -230,16 +226,13 @@ export class CodeIndexer {
       for (const p of result.points) {
         const old = ((p.payload ?? {}) as Record<string, unknown>)["branches"] as string[] | undefined ?? [];
         const updated = old.filter((b) => b !== branch);
-        if (updated.length === 0) {
-          // No branches left — delete the chunk
-          await qd.delete(this.collection, { points: [String(p.id)] });
-        } else {
-          await qd.setPayload(this.collection, {
-            payload: { branches: updated },
-            points: [String(p.id)],
-            wait: true,
-          } as never);
-        }
+        // Always update payload — never hard-delete during indexing.
+        // Chunks with branches:[] are orphaned and will be cleaned up by gc().
+        await qd.setPayload(this.collection, {
+          payload: { branches: updated },
+          points: [String(p.id)],
+          wait: true,
+        } as never);
       }
 
       const next = (result as { next_page_offset?: string | number | null }).next_page_offset;
@@ -333,88 +326,31 @@ export class CodeIndexer {
   }
 
   /**
-   * Process only a diff set of changed files.
-   */
-  async indexDiff(
-    changedFiles: Array<{ path: string; status: "added" | "modified" | "deleted" }>,
-    root: string,
-    branch?: string,
-  ): Promise<number> {
-    const br = branch ?? this._branch;
-    const pathBase = this.projectRoot ? resolve(this.projectRoot) : root;
-    let totalChunks = 0;
-
-    for (const file of changedFiles) {
-      const absPath = join(pathBase, file.path);
-
-      if (file.status === "deleted") {
-        await this.untagFile(file.path, br);
-        continue;
-      }
-
-      if (!existsSync(absPath)) {
-        await this.untagFile(file.path, br);
-        continue;
-      }
-
-      try {
-        const [n] = await this.indexFileIncremental(absPath, root, br);
-        totalChunks += n;
-      } catch (err: unknown) {
-        process.stderr.write(`[indexer] diff: ${file.path}: ${String(err)}\n`);
-      }
-    }
-
-    return totalChunks;
-  }
-
-  /**
-   * Handle branch switch: diff manifests, incrementally reindex only changed files.
+   * Handle branch switch: for each file on the new branch, check Qdrant by hash.
+   * If chunks with the same hash already exist they are tagged for the new branch (no re-embed).
+   * Only files whose content is not yet in Qdrant are indexed from scratch.
    */
   async switchBranch(root: string, oldBranch: string, newBranch: string): Promise<void> {
     const t0 = Date.now();
     const pathBase = this.projectRoot ? resolve(this.projectRoot) : root;
     this._branch = newBranch;
 
-    // Initialize resolver if not done yet
     if (!this.resolver) {
       this.resolver = new ImportResolver({ root: pathBase });
     }
 
-    // Save manifest for old branch before switching
-    const oldManifest = this._buildDiskManifest(root);
-    await saveManifest(oldBranch, oldManifest).catch(() => undefined);
+    const files = this.collectFiles(resolve(root));
+    process.stderr.write(
+      `[indexer] Branch switch ${oldBranch} \u2192 ${newBranch}: checking ${files.length} files\n`,
+    );
 
-    // Load stored manifest for new branch (if any)
-    const storedManifest = await loadManifest(newBranch);
-
-    // Build current disk manifest (files as they are NOW on disk = new branch)
-    const diskManifest = this._buildDiskManifest(root);
-
-    if (storedManifest) {
-      // Diff stored manifest vs disk
-      const diff = diffManifests(storedManifest, diskManifest);
-      if (diff.length > 0) {
-        process.stderr.write(`[indexer] Branch switch ${oldBranch} → ${newBranch}: ${diff.length} files changed\n`);
-        await this.indexDiff(diff, root, newBranch);
-      } else {
-        process.stderr.write(`[indexer] Branch switch ${oldBranch} → ${newBranch}: no changes\n`);
-      }
-    } else {
-      // No stored manifest — need to process all files, but file_hash dedup will help
-      process.stderr.write(`[indexer] Branch switch to new branch "${newBranch}": scanning all files\n`);
-      const files = this.collectFiles(resolve(root));
-      for (const absPath of files) {
-        await this.indexFileIncremental(absPath, root, newBranch).catch((err: unknown) => {
-          process.stderr.write(`[indexer] ${absPath}: ${String(err)}\n`);
-        });
-      }
+    for (const absPath of files) {
+      await this.indexFileIncremental(absPath, root, newBranch).catch((err: unknown) => {
+        process.stderr.write(`[indexer] ${absPath}: ${String(err)}\n`);
+      });
     }
 
-    // Save updated manifest for new branch
-    await saveManifest(newBranch, diskManifest).catch(() => undefined);
     await invalidateProjectOverview(this.projectId).catch(() => undefined);
-
     process.stderr.write(`[indexer] Branch switch complete in ${Date.now() - t0}ms\n`);
   }
 
@@ -1126,32 +1062,6 @@ export class CodeIndexer {
 
 function hashSource(source: string): string {
   return createHash("sha256").update(source).digest("hex");
-}
-
-/** Compare two manifests and return the list of changed files. */
-function diffManifests(
-  stored: FileManifest,
-  disk: FileManifest,
-): Array<{ path: string; status: "added" | "modified" | "deleted" }> {
-  const changes: Array<{ path: string; status: "added" | "modified" | "deleted" }> = [];
-
-  // Files in disk but not stored (added) or with different hash (modified)
-  for (const [path, hash] of Object.entries(disk)) {
-    if (!(path in stored)) {
-      changes.push({ path, status: "added" });
-    } else if (stored[path] !== hash) {
-      changes.push({ path, status: "modified" });
-    }
-  }
-
-  // Files in stored but not on disk (deleted)
-  for (const path of Object.keys(stored)) {
-    if (!(path in disk)) {
-      changes.push({ path, status: "deleted" });
-    }
-  }
-
-  return changes;
 }
 
 function buildEmbedContext(c: CodeChunk): string {

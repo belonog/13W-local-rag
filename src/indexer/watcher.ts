@@ -5,7 +5,7 @@ import type { CodeIndexer } from "./indexer.js";
 import { GitignoreFilter } from "./gitignore.js";
 import { cfg } from "../config.js";
 import { recordIndex, broadcastBranchSwitch } from "../plugins/dashboard.js";
-import { getCurrentBranch, getGitHeadPath, saveGitState } from "./git.js";
+import { getCurrentBranch, getGitHeadPath, isNamedBranch, saveGitState } from "./git.js";
 import { setCurrentBranch } from "../config.js";
 
 // Directories that must never receive inotify watches (mirrors IGNORE_DIRS in indexer.ts)
@@ -149,6 +149,15 @@ export function startWatcher(
           if (switchInProgress) return;
           const newBranch = getCurrentBranch(root);
           if (newBranch === indexer.branch) return;
+
+          // Skip indexing during detached HEAD (rebase, bisect, bare SHA checkout).
+          // When rebase completes and HEAD returns to a named branch, this fires again.
+          if (!isNamedBranch(root)) {
+            process.stderr.write(
+              `[watcher] Detached HEAD (${newBranch}) — skipping indexing\n`,
+            );
+            return;
+          }
 
           switchInProgress = true;
           const oldBranch = indexer.branch;
