@@ -5,14 +5,17 @@ import { ListToolsRequestSchema, CallToolRequestSchema, ErrorCode, McpError }
   from "@modelcontextprotocol/sdk/types.js";
 import { TOOLS, TOOL_MAP, dispatchTool }  from "../tools/registry.js";
 import { requestContext }                 from "../request-context.js";
-import { record }                         from "./dashboard.js";
+import { record, recordAgentConnect }      from "./dashboard.js";
 import { debugLog }                       from "../util.js";
 
-function buildMcpServer(): Server {
+function buildMcpServer(projectId: string, agentId: string): Server {
   const server = new Server(
     { name: "local-rag", version: "2.0.0" },
     { capabilities: { tools: {}, resources: {}, prompts: {}, logging: {} } }
   );
+
+  // Fire when the MCP initialize handshake completes — agent is now connected.
+  server.oninitialized = () => { recordAgentConnect(projectId, agentId); };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
@@ -55,7 +58,7 @@ async function handleMcpRequest(req: FastifyRequest, reply: FastifyReply): Promi
   const agentId   = q["agent"]   ?? "default";
 
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  const mcpServer = buildMcpServer();
+  const mcpServer = buildMcpServer(projectId, agentId);
   await mcpServer.connect(transport);
 
   await requestContext.run({ projectId, agentId }, async () => {

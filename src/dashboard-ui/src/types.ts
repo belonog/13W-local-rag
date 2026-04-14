@@ -89,11 +89,12 @@ export interface OverviewData {
 }
 
 export interface InitData {
-  stats:      Record<string, ToolStats>;
-  log:        RequestEntry[];
-  schemas:    ToolSchemaDef[];
-  serverInfo: ServerInfo;
-  projects:   ProjectConfigData[];
+  stats:             Record<string, ToolStats>;
+  log:               RequestEntry[];
+  schemas:           ToolSchemaDef[];
+  serverInfo:        ServerInfo;
+  projects:          ProjectConfigData[];
+  agentConnections?: Record<string, { ts: number; agentId: string }>;
 }
 
 export interface EmbedConfigData {

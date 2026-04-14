@@ -60,13 +60,27 @@
   }
 
   <div class="mt-1 mb-3">
-    <span
-      class="inline-block text-xs px-2 py-0.5 rounded-full font-mono transition-colors duration-100"
-      [class]="sse.status() === 'disconnected'
-        ? 'bg-(--color-err)/15 text-(--color-err)'
-        : 'bg-(--color-surface) text-(--color-muted)'">
-      {{ sse.status() === 'connecting' ? 'connecting…' : sse.status() }}
-    </span>
+    @if (sse.status() === 'disconnected') {
+      <span class="inline-block text-xs px-2 py-0.5 rounded-full font-mono bg-(--color-err)/15 text-(--color-err)">
+        disconnected
+      </span>
+    } @else if (sse.status() === 'connecting') {
+      <span class="inline-block text-xs px-2 py-0.5 rounded-full font-mono bg-(--color-surface) text-(--color-muted)">
+        connecting…
+      </span>
+    } @else {
+      <span
+        class="inline-block text-xs px-2 py-0.5 rounded-full font-mono transition-colors duration-100"
+        [class]="agentStatus().state === 'active'
+          ? 'bg-(--color-sky)/12 text-(--color-sky)'
+          : 'bg-(--color-surface) text-(--color-muted)'">
+        @if (agentStatus().state === 'none') {
+          no agent
+        } @else {
+          agent · {{ fmtAgo(agentStatus().ts!) }}
+        }
+      </span>
+    }
   </div>
 
   <!-- Error panel -->

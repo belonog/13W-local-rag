@@ -52,6 +52,9 @@ const LOG_MAX    = 500;
 
 const sseClients = new Set<ServerResponse>();
 
+/** Last MCP initialize handshake per project (agent connected). */
+const lastAgentConnect = new Map<string, { ts: number; agentId: string }>();
+
 let _dispatch: DispatchFn | null = null;
 let _toolSchemasJson = "[]";
 let _active = false;
@@ -90,6 +93,29 @@ export function record(
 
   // SSE broadcast
   const data = `data: ${JSON.stringify({ type: "entry", entry, stats: statsSnapshot(), memory: memStats() })}\n\n`;
+  for (const res of new Set(sseClients)) res.write(data);
+}
+
+/**
+ * Called when an MCP client completes the initialize handshake.
+ * Updates the per-project agent connection tracker and broadcasts via SSE.
+ */
+export function recordAgentConnect(projectId: string, agentId: string): void {
+  if (!_active) return;
+  const ts = Date.now();
+  lastAgentConnect.set(projectId, { ts, agentId });
+  const data = `data: ${JSON.stringify({ type: "agent-connect", projectId, agentId, ts })}\n\n`;
+  for (const res of new Set(sseClients)) res.write(data);
+}
+
+/**
+ * Called when an agent session ends (SessionEnd hook).
+ * Removes the per-project agent connection entry and broadcasts via SSE.
+ */
+export function recordAgentDisconnect(projectId: string, agentId: string): void {
+  if (!_active) return;
+  lastAgentConnect.delete(projectId);
+  const data = `data: ${JSON.stringify({ type: "agent-disconnect", projectId, agentId })}\n\n`;
   for (const res of new Set(sseClients)) res.write(data);
 }
 
@@ -350,12 +376,13 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
       const projects = await listProjectConfigs(qd);
 
       const init   = JSON.stringify({
-        stats:      statsSnapshot(),
-        log:        requestLog,
-        schemas:    JSON.parse(_toolSchemasJson) as unknown[],
-        serverInfo: await serverInfo(),
-        memory:     memStats(),
+        stats:           statsSnapshot(),
+        log:             requestLog,
+        schemas:         JSON.parse(_toolSchemasJson) as unknown[],
+        serverInfo:      await serverInfo(),
+        memory:          memStats(),
         projects,
+        agentConnections: Object.fromEntries(lastAgentConnect),
       });
       const inject = `<script>window.__INIT__=${init}</script>`;
       const out    = html.replace("</head>", `${inject}\n</head>`);
@@ -380,7 +407,7 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     return requestContext.run({ projectId, agentId }, async () => {
       const { listProjectConfigs } = await import("../server-config.js");
       const projects = await listProjectConfigs(qd);
-      const data = `data: ${JSON.stringify({ type: "init", stats: statsSnapshot(), log: requestLog, serverInfo: await serverInfo(), memory: memStats(), projects })}\n\n`;
+      const data = `data: ${JSON.stringify({ type: "init", stats: statsSnapshot(), log: requestLog, serverInfo: await serverInfo(), memory: memStats(), projects, agentConnections: Object.fromEntries(lastAgentConnect) })}\n\n`;
       raw.write(data);
       sseClients.add(raw);
       req.raw.on("close", () => { sseClients.delete(raw); });
@@ -571,12 +598,13 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
       const { listProjectConfigs } = await import("../server-config.js");
       const projects = await listProjectConfigs(qd);
       return {
-        stats:      statsSnapshot(),
-        log:        requestLog,
-        schemas:    JSON.parse(_toolSchemasJson) as unknown[],
-        serverInfo: await serverInfo(),
-        memory:     memStats(),
+        stats:            statsSnapshot(),
+        log:              requestLog,
+        schemas:          JSON.parse(_toolSchemasJson) as unknown[],
+        serverInfo:       await serverInfo(),
+        memory:           memStats(),
         projects,
+        agentConnections: Object.fromEntries(lastAgentConnect),
       };
     });
   });

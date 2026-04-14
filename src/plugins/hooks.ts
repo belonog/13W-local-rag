@@ -25,7 +25,7 @@ import {
   safeParseLines,
   type JsonLine,
 } from "../util.js";
-import { record } from "./dashboard.js";
+import { record, recordAgentDisconnect } from "./dashboard.js";
 import { setSession }            from "../session-store.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -317,6 +317,9 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
 
       // Store session_id so give_feedback tool can use it as fallback
       setSession(projectId, agentId, sessionId);
+
+      // Clear agent connection status on dashboard
+      recordAgentDisconnect(projectId, agentId);
 
       const systemMessage = buildSessionEndMessage(sessionId);
 

@@ -71,4 +71,21 @@ export class AppComponent implements OnInit {
   }
 
   fmtTime(ts: number): string { return new Date(ts).toTimeString().slice(0, 8); }
+
+  /** Status of agent MCP connection for the currently selected project. */
+  readonly agentStatus = computed(() => {
+    const proj   = this.selectedProject();
+    const entry  = proj ? this.sse.agentConnections()[proj] : undefined;
+    if (!entry) return { state: "none" as const };
+    const ageMs  = Date.now() - entry.ts;
+    if (ageMs < 5 * 60_000) return { state: "active" as const, ts: entry.ts };
+    return { state: "seen" as const, ts: entry.ts };
+  });
+
+  fmtAgo(ts: number): string {
+    const sec = Math.floor((Date.now() - ts) / 1000);
+    if (sec < 60)   return `${sec}s ago`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+    return `${Math.floor(sec / 3600)}h ago`;
+  }
 }
