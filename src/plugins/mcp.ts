@@ -40,9 +40,6 @@ Memory types: "episodic" (events, bugs), "semantic" (facts, architecture),
 "open_question", "in_progress", "hypothesis", "resolved" — is a priority
 signal: treat open_question and in_progress as active agenda.
 
-Languages: queries should be in English (better embedding match). Content in
-remember() may stay in the source language to preserve nuance.
-
 Anti-patterns: batching remember() at session end (knowledge decays),
 skipping recall() because "I know this codebase" (you don't remember past
 sessions), ignoring search_code in favour of Read/grep on unfamiliar repos.

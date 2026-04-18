@@ -32,7 +32,7 @@
   ],
   "scripts": {
     "build:ui": "pnpm -C src/dashboard-ui run build",
-    "build": "pnpm run build:ui && tsc && mkdir -p dist/rules && cp src/rules/*.md dist/rules/",
+    "build": "pnpm run build:ui && tsc",
     "start": "node dist/bin.js serve",
     "index": "node dist/bin.js index",
     "watch": "node dist/bin.js watch",
@@ -46,26 +46,26 @@
     "prepublish": "pnpm build"
   },
   "dependencies": {
-    "@fastify/static": "^9.0.0",
+    "@fastify/static": "^9.1.1",
     "@google/gemini-cli": "0.39.0-nightly.20260411.0957f7d3e",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@qdrant/js-client-rest": "^1.17.0",
     "chokidar": "^5.0.0",
-    "fastify": "^5.8.4",
+    "fastify": "^5.8.5",
     "ignore": "^7.0.5",
     "js-yaml": "^4.1.1",
     "smol-toml": "^1.6.1",
     "tree-sitter-go": "^0.25.0",
     "tree-sitter-rust": "^0.24.0",
     "tree-sitter-typescript": "^0.23.2",
-    "web-tree-sitter": "^0.26.7",
+    "web-tree-sitter": "^0.26.8",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.5.0",
-    "@vitest/coverage-v8": "^4.1.2",
-    "typescript": "^6.0.2",
-    "vitest": "^4.1.2"
+    "@types/node": "^25.6.0",
+    "@vitest/coverage-v8": "^4.1.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.4"
   }
 }
