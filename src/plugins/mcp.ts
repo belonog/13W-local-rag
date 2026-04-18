@@ -8,11 +8,55 @@ import { requestContext }                 from "../request-context.js";
 import { record, recordAgentConnect }      from "./dashboard.js";
 import { debugLog }                       from "../util.js";
 
+// Server instructions are delivered once in the MCP `initialize` handshake
+// and injected by clients (Claude Code, VSCode Copilot, Goose, Zed...) directly
+// into the system prompt. This is the correct channel for static setup guidance —
+// it beats SessionStart hooks on salience, persists across /compact, and works
+// before any user turn. Keep under 2048 chars (Claude Code truncates at 2KB).
+// Put the most important guidance near the top; weaker models only read the start.
+const SERVER_INSTRUCTIONS = `
+You have access to a persistent memory + code-RAG server for this project.
+Treat it as your long-term memory: prior decisions, bug fixes, open questions,
+and a semantic index of the codebase all live here. You have continuity across
+sessions only through these tools.
+
+Core workflow for any non-trivial task:
+
+  1. recall(query)        — before starting. Past decisions, resolved bugs,
+                            open_questions, work in progress. Skip only for
+                            trivial edits or pure syntax questions.
+  2. search_code(query)   — locate code by meaning, not by filename. Use when
+                            you don't know where something lives. Returns
+                            symbols with file paths and content chunks.
+  3. [think + act]
+  4. remember(content, memory_type, importance)
+                          — the moment you learn something: a bug's root cause,
+                            a non-obvious pattern, a command that works, an API
+                            constraint. One fact per call. Without this,
+                            knowledge is lost at session end.
+
+Memory types: "episodic" (events, bugs), "semantic" (facts, architecture),
+"procedural" (patterns, conventions). Status on recall results —
+"open_question", "in_progress", "hypothesis", "resolved" — is a priority
+signal: treat open_question and in_progress as active agenda.
+
+Languages: queries should be in English (better embedding match). Content in
+remember() may stay in the source language to preserve nuance.
+
+Anti-patterns: batching remember() at session end (knowledge decays),
+skipping recall() because "I know this codebase" (you don't remember past
+sessions), ignoring search_code in favour of Read/grep on unfamiliar repos.
+`.trim();
+
 function buildMcpServer(projectId: string, agentId: string): Server {
   const server = new Server(
     { name: "local-rag", version: "2.0.0" },
-    { capabilities: { tools: {}, resources: {}, prompts: {}, logging: {} } }
+    {
+      capabilities:  { tools: {}, resources: {}, prompts: {}, logging: {} },
+      instructions: SERVER_INSTRUCTIONS,
+    }
   );
+
 
   // Fire when the MCP initialize handshake completes — agent is now connected.
   server.oninitialized = () => { recordAgentConnect(projectId, agentId); };
