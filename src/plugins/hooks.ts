@@ -185,8 +185,18 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
           systemMessage = await runArchivist(archivistInput);
         }
 
+        // UserPromptSubmit: inject archivist output via hookSpecificOutput.additionalContext
+        // so it actually lands in the model's context. The top-level `systemMessage` field
+        // is a UI-only message (shown to the user, not the model) per Claude Code hook spec.
+        const response = {
+          hookSpecificOutput: {
+            hookEventName:     "UserPromptSubmit" as const,
+            additionalContext: systemMessage,
+          },
+        };
+
         const ms       = Date.now() - t0;
-        const bytesOut = JSON.stringify({ systemMessage }).length;
+        const bytesOut = JSON.stringify(response).length;
         record("hooks/recall", "hook", bytesIn, bytesOut, ms, true);
 
         await persistHookCall("recall", sessionId, projectId, {
@@ -195,7 +205,7 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
           result_chars: systemMessage.length,
         });
 
-        return reply.send({ systemMessage });
+        return reply.send(response);
       } catch (err: unknown) {
         const ms = Date.now() - t0;
         record("hooks/recall", "hook", bytesIn, 0, ms, false, String(err));

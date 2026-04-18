@@ -23,5 +23,14 @@ export async function runHookSessionStart(): Promise<void> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
 
-  process.stdout.write(JSON.stringify({ systemMessage: SESSION_START_MESSAGE }));
+  // Use hookSpecificOutput.additionalContext — that's the field Claude Code injects into
+  // the model's context for SessionStart. The top-level `systemMessage` is a UI-only banner
+  // (shown to the user) and is *not* seen by the model — which is why prior session-start
+  // messages appeared to be ignored by the agent.
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName:     "SessionStart",
+      additionalContext: SESSION_START_MESSAGE,
+    },
+  }));
 }
