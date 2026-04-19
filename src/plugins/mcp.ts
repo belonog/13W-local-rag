@@ -45,7 +45,7 @@ skipping recall() because "I know this codebase" (you don't remember past
 sessions), ignoring search_code in favour of Read/grep on unfamiliar repos.
 `.trim();
 
-function buildMcpServer(projectId: string, agentId: string): Server {
+function buildMcpServer(projectId: string): Server {
   const server = new Server(
     { name: "local-rag", version: "2.0.0" },
     {
@@ -56,7 +56,7 @@ function buildMcpServer(projectId: string, agentId: string): Server {
 
 
   // Fire when the MCP initialize handshake completes — agent is now connected.
-  server.oninitialized = () => { recordAgentConnect(projectId, agentId); };
+  server.oninitialized = () => { recordAgentConnect(projectId); };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
@@ -96,13 +96,12 @@ function buildMcpServer(projectId: string, agentId: string): Server {
 async function handleMcpRequest(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const q         = req.query as Record<string, string>;
   const projectId = q["project"] ?? "default";
-  const agentId   = q["agent"]   ?? "default";
 
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  const mcpServer = buildMcpServer(projectId, agentId);
+  const mcpServer = buildMcpServer(projectId);
   await mcpServer.connect(transport);
 
-  await requestContext.run({ projectId, agentId }, async () => {
+  await requestContext.run({ projectId }, async () => {
     await transport.handleRequest(req.raw, reply.raw, req.body);
   });
 

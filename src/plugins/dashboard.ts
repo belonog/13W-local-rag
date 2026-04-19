@@ -6,7 +6,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import { cfg } from "../config.js";
-import { getProjectId as getProjectIdCtx, getAgentId as getAgentIdCtx, requestContext } from "../request-context.js";
+import { getProjectId as getProjectIdCtx, requestContext } from "../request-context.js";
 import { qd, colName } from "../qdrant.js";
 import type { ProjectConfig } from "../server-config.js";
 
@@ -32,7 +32,6 @@ interface RequestEntry {
   tool:     string;
   source:   "mcp" | "playground" | "watcher" | "hook";
   projectId: string;
-  agentId:   string;
   bytesIn:  number;
   bytesOut: number;
   ms:       number;
@@ -53,7 +52,7 @@ const LOG_MAX    = 500;
 const sseClients = new Set<ServerResponse>();
 
 /** Last MCP initialize handshake per project (agent connected). */
-const lastAgentConnect = new Map<string, { ts: number; agentId: string }>();
+const lastAgentConnect = new Map<string, { ts: number }>();
 
 let _dispatch: DispatchFn | null = null;
 let _toolSchemasJson = "[]";
@@ -80,7 +79,6 @@ export function record(
     tool,
     source,
     projectId: getProjectIdCtx(),
-    agentId:   getAgentIdCtx(),
     bytesIn,
     bytesOut,
     ms,
@@ -100,11 +98,11 @@ export function record(
  * Called when an MCP client completes the initialize handshake.
  * Updates the per-project agent connection tracker and broadcasts via SSE.
  */
-export function recordAgentConnect(projectId: string, agentId: string): void {
+export function recordAgentConnect(projectId: string): void {
   if (!_active) return;
   const ts = Date.now();
-  lastAgentConnect.set(projectId, { ts, agentId });
-  const data = `data: ${JSON.stringify({ type: "agent-connect", projectId, agentId, ts })}\n\n`;
+  lastAgentConnect.set(projectId, { ts });
+  const data = `data: ${JSON.stringify({ type: "agent-connect", projectId, ts })}\n\n`;
   for (const res of new Set(sseClients)) res.write(data);
 }
 
@@ -112,16 +110,16 @@ export function recordAgentConnect(projectId: string, agentId: string): void {
  * Called when an agent session ends (SessionEnd hook).
  * Removes the per-project agent connection entry and broadcasts via SSE.
  */
-export function recordAgentDisconnect(projectId: string, agentId: string): void {
+export function recordAgentDisconnect(projectId: string): void {
   if (!_active) return;
   lastAgentConnect.delete(projectId);
-  const data = `data: ${JSON.stringify({ type: "agent-disconnect", projectId, agentId })}\n\n`;
+  const data = `data: ${JSON.stringify({ type: "agent-disconnect", projectId })}\n\n`;
   for (const res of new Set(sseClients)) res.write(data);
 }
 
 export function recordIndex(projectId: string, relPath: string, chunks: number, ms: number, ok: boolean, error?: string): void {
   if (!_active) return;
-  const entry: RequestEntry = { ts: Date.now(), tool: "indexer", file: relPath, source: "watcher", projectId, agentId: "indexer", bytesIn: 0, bytesOut: 0, ms, ok, chunks, error };
+  const entry: RequestEntry = { ts: Date.now(), tool: "indexer", file: relPath, source: "watcher", projectId, bytesIn: 0, bytesOut: 0, ms, ok, chunks, error };
   updateStats(entry);
   requestLog.push(entry);
   if (requestLog.length > LOG_MAX) requestLog.shift();
@@ -135,11 +133,10 @@ async function serverInfo(): Promise<ServerInfo> {
   const projectId = getProjectIdCtx();
   const { loadProjectConfig } = await import("../server-config.js");
   const project = await loadProjectConfig(qd, projectId);
-  const root = project?.project_root || cfg.projectRoot;
+  const root = project?.project_dir || cfg.projectRoot;
 
   return {
     projectId,
-    agentId:              getAgentIdCtx(),
     version:              PKG_VERSION,
     branch:               getCurrentBranch(root),
     collectionPrefix:     cfg.collectionPrefix,
@@ -153,7 +150,6 @@ async function serverInfo(): Promise<ServerInfo> {
 
 interface ServerInfo {
   projectId:            string;
-  agentId:              string;
   version:              string;
   branch:               string;
   collectionPrefix:     string;
@@ -368,9 +364,8 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
   fastify.get("/", async (req, reply) => {
     const q         = req.query as Record<string, string>;
     const projectId = q["project"] || "default";
-    const agentId   = q["agent"]   || projectId;
 
-    return requestContext.run({ projectId, agentId }, async () => {
+    return requestContext.run({ projectId }, async () => {
       const html   = readFileSync(resolve(_uiDir, "index.html"), "utf8");
       const { listProjectConfigs } = await import("../server-config.js");
       const projects = await listProjectConfigs(qd);
@@ -402,9 +397,8 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
 
     const q = req.query as Record<string, string>;
     const projectId = q["project"] || "default";
-    const agentId   = q["agent"]   || projectId;
 
-    return requestContext.run({ projectId, agentId }, async () => {
+    return requestContext.run({ projectId }, async () => {
       const { listProjectConfigs } = await import("../server-config.js");
       const projects = await listProjectConfigs(qd);
       const data = `data: ${JSON.stringify({ type: "init", stats: statsSnapshot(), log: requestLog, serverInfo: await serverInfo(), memory: memStats(), projects, agentConnections: Object.fromEntries(lastAgentConnect) })}\n\n`;
@@ -461,16 +455,15 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     };
   });
 
-  fastify.get<{ Querystring: { q?: string; project_id?: string; agent_id?: string } }>("/api/memory/search", async (req) => {
+  fastify.get<{ Querystring: { q?: string; project_id?: string } }>("/api/memory/search", async (req) => {
     const q = (req.query.q ?? "").trim();
     if (!q) return { systemMessage: "", results: [] };
 
     const projectId = req.query.project_id || "default";
-    const agentId   = req.query.agent_id   || projectId;
 
     const { runArchivist }   = await import("../archivist.js");
 
-    return requestContext.run({ projectId, agentId }, async () => {
+    return requestContext.run({ projectId }, async () => {
       const systemMessage = await runArchivist(q);
       const { embedOne } = await import("../embedder.js");
       const embedding = await embedOne(q);
@@ -568,13 +561,12 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
     return reply.code(201).send({ ok: true });
   });
 
-  fastify.post<{ Body: { tool: string; args: Record<string, unknown>; project_id?: string; agent_id?: string } }>("/api/run", (req, reply) => {
+  fastify.post<{ Body: { tool: string; args: Record<string, unknown>; project_id?: string } }>("/api/run", (req, reply) => {
     if (!_dispatch) return reply.code(503).send({ error: "Dashboard not initialized" });
-    const { tool, args, project_id, agent_id } = req.body;
+    const { tool, args, project_id } = req.body;
     const projectId = project_id || "default";
-    const agentId   = agent_id   || projectId;
 
-    return requestContext.run({ projectId, agentId }, async () => {
+    return requestContext.run({ projectId }, async () => {
       const t0 = Date.now();
       try {
         const result = await _dispatch!(tool, args);
@@ -592,9 +584,8 @@ export async function dashboardPlugin(fastify: FastifyInstance): Promise<void> {
   fastify.get("/api/init", async (req) => {
     const q         = req.query as Record<string, string>;
     const projectId = q["project"] || "default";
-    const agentId   = q["agent"]   || projectId;
 
-    return requestContext.run({ projectId, agentId }, async () => {
+    return requestContext.run({ projectId }, async () => {
       const { listProjectConfigs } = await import("../server-config.js");
       const projects = await listProjectConfigs(qd);
       return {

@@ -1,6 +1,6 @@
 import { qd, colName }              from "../qdrant.js";
 import { embedOne }                  from "../embedder.js";
-import { getProjectId, getAgentId }  from "../request-context.js";
+import { getProjectId }              from "../request-context.js";
 import { getSession }                from "../session-store.js";
 import { nowIso, contentHash }       from "../util.js";
 
@@ -12,10 +12,9 @@ export interface GiveFeedbackArgs {
 
 export async function giveFeedbackTool(a: GiveFeedbackArgs): Promise<string> {
   const projectId = getProjectId();
-  const agentId   = getAgentId();
 
   // Resolve session_id: args first, then SessionStore fallback, then "unknown"
-  const sessionId = a.session_id || getSession(projectId, agentId) || "unknown";
+  const sessionId = a.session_id || getSession(projectId) || "unknown";
 
   const id        = crypto.randomUUID();
   const now       = nowIso();
@@ -29,7 +28,6 @@ export async function giveFeedbackTool(a: GiveFeedbackArgs): Promise<string> {
         content:      a.content,
         session_id:   sessionId,
         project_id:   projectId,
-        agent_id:     agentId,
         agent_type:   a.agent_type || "unknown",
         hook_event:   "SessionEnd",
         created_at:   now,

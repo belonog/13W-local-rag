@@ -11,6 +11,7 @@
 
 import { FastifyInstance } from "fastify";
 import { readFileSync, existsSync } from "node:fs";
+import { basename } from "node:path";
 import { getProjectId } from "../config.js";
 import { qd, colName } from "../qdrant.js";
 import { runArchivist } from "../archivist.js";
@@ -81,7 +82,6 @@ type SessionType = "headless" | "multi-agent" | "editing" | "planning";
 interface SessionDetection {
   type: SessionType;
   threshold: number;
-  agentId?: string;
 }
 
 function detectSessionType(body: HookBody, lines: JsonLine[]): SessionDetection {
@@ -94,7 +94,7 @@ function detectSessionType(body: HookBody, lines: JsonLine[]): SessionDetection 
     if (line["type"] === "SubagentStop") {
       const agentId = String(line["agent_id"] ?? line["subagent_id"] ?? "");
       if (agentId) {
-        return { type: "multi-agent", threshold: 0.80, agentId };
+        return { type: "multi-agent", threshold: 0.80 };
       }
     }
   }
@@ -159,18 +159,17 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
 
   // ── POST /hooks/recall ───────────────────────────────────────────────────────
 
-  fastify.post<{ Body: HookBody; Querystring: { project?: string; agent?: string } }>("/hooks/recall", async (req, reply) => {
+  fastify.post<{ Body: HookBody; Querystring: { project_dir?: string } }>("/hooks/recall", async (req, reply) => {
     const t0        = Date.now();
     const body      = req.body ?? {} as HookBody;
     const bytesIn   = JSON.stringify(body).length;
-    const projectId = req.query.project || "default";
-    const agentId   = req.query.agent   || projectId;
+    const projectId = req.query.project_dir ? basename(req.query.project_dir) : "default";
 
     const prompt          = (body.prompt ?? "").trim();
     const transcriptPath  = body.transcript_path ?? "";
     const sessionId       = body.session_id ?? "unknown";
 
-    return runWithContext({ projectId, agentId }, async () => {
+    return runWithContext({ projectId }, async () => {
       debugLog("hooks/recall", `session=${sessionId} prompt="${prompt.slice(0, 80)}"`);
 
       let systemMessage = "";
@@ -200,7 +199,6 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
         record("hooks/recall", "hook", bytesIn, bytesOut, ms, true);
 
         await persistHookCall("recall", sessionId, projectId, {
-          agent_id:     agentId,
           prompt_chars: prompt.length,
           result_chars: systemMessage.length,
         });
@@ -217,26 +215,23 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
 
   // ── POST /hooks/remember ─────────────────────────────────────────────────────
 
-  fastify.post<{ Body: HookBody; Querystring: { project?: string; agent?: string } }>("/hooks/remember", async (req, reply) => {
+  fastify.post<{ Body: HookBody; Querystring: { project_dir?: string } }>("/hooks/remember", async (req, reply) => {
     const t0        = Date.now();
     const body      = req.body ?? {} as HookBody;
     const bytesIn   = JSON.stringify(body).length;
-    const projectId = req.query.project || "default";
-    const agentId   = req.query.agent   || projectId;
+    const projectId = req.query.project_dir ? basename(req.query.project_dir) : "default";
 
     const transcriptPath  = body.transcript_path ?? "";
     const sessionId       = body.session_id       ?? "unknown";
 
-    // Detect session type and agent ID
+    // Detect session type
     const raw = (transcriptPath && existsSync(transcriptPath))
       ? readFileSync(transcriptPath, "utf8")
       : "";
     const lines = safeParseLines(raw);
-    const { type: sessionType, threshold, agentId: detectedAgentId } = detectSessionType(body, lines);
+    const { type: sessionType, threshold } = detectSessionType(body, lines);
 
-    const finalAgentId = detectedAgentId || agentId;
-
-    return runWithContext({ projectId, agentId: finalAgentId }, async () => {
+    return runWithContext({ projectId }, async () => {
       debugLog("hooks/remember", `session=${sessionId} type=${sessionType} transcript="${transcriptPath}"`);
 
       let systemMessage = "";
@@ -294,7 +289,6 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
         record("hooks/remember", "hook", bytesIn, bytesOut, ms, true);
 
         await persistHookCall("remember", sessionId, projectId, {
-          agent_id:       finalAgentId,
           ops_total:      ops.length,
           ops_direct:     directOps.length,
           ops_validation: validationOps.length,
@@ -312,24 +306,22 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
 
   // ── POST /hooks/session-end ──────────────────────────────────────────────────
 
-  fastify.post<{ Body: HookBody; Querystring: { project?: string; agent?: string; agent_type?: string } }>("/hooks/session-end", async (req, reply) => {
+  fastify.post<{ Body: HookBody; Querystring: { project_dir?: string } }>("/hooks/session-end", async (req, reply) => {
     const t0        = Date.now();
     const body      = req.body ?? {} as HookBody;
     const bytesIn   = JSON.stringify(body).length;
-    const projectId = req.query.project    || "default";
-    const agentId   = req.query.agent      || projectId;
-    const agentType = req.query.agent_type || "unknown";
+    const projectId = req.query.project_dir ? basename(req.query.project_dir) : "default";
 
     const sessionId = body.session_id ?? "unknown";
 
-    return runWithContext({ projectId, agentId }, async () => {
-      debugLog("hooks/session-end", `session=${sessionId} agent_type=${agentType}`);
+    return runWithContext({ projectId }, async () => {
+      debugLog("hooks/session-end", `session=${sessionId}`);
 
       // Store session_id so give_feedback tool can use it as fallback
-      setSession(projectId, agentId, sessionId);
+      setSession(projectId, sessionId);
 
       // Clear agent connection status on dashboard
-      recordAgentDisconnect(projectId, agentId);
+      recordAgentDisconnect(projectId);
 
       const systemMessage = buildSessionEndMessage(sessionId);
 
@@ -338,8 +330,6 @@ export async function hooksPlugin(fastify: FastifyInstance): Promise<void> {
       record("hooks/session-end", "hook", bytesIn, bytesOut, ms, true);
 
       await persistHookCall("session-end", sessionId, projectId, {
-        agent_id:   agentId,
-        agent_type: agentType,
         hook_event: body.hook_event_name ?? "SessionEnd",
       });
 
