@@ -43,8 +43,7 @@ export type IndexerState = "running" | "paused" | "stopped";
 export interface ProjectConfig {
   project_id:    string;
   display_name:  string;
-  agent_id:      string;
-  project_root:  string;
+  project_dir:   string;
   include_paths: string[];
   indexer_state: IndexerState;
   created_at:    string;
@@ -80,8 +79,7 @@ export function mergeProjectConfig(raw: Partial<ProjectConfig> & { project_id: s
   return {
     project_id:    raw.project_id,
     display_name:  raw.display_name  ?? raw.project_id,
-    agent_id:      raw.agent_id      ?? raw.project_id,
-    project_root:  raw.project_root  ?? "",
+    project_dir:   raw.project_dir   ?? "",
     include_paths: raw.include_paths ?? [],
     indexer_state: raw.indexer_state ?? "stopped",
     created_at:    raw.created_at    ?? now,

@@ -23,5 +23,16 @@ describe("mergeProjectConfig", () => {
     expect(p.project_id).toBe("myproj");
     expect(p.indexer_state).toBe("stopped");
     expect(p.include_paths).toEqual([]);
+    expect((p as Record<string, unknown>)["agent_id"]).toBeUndefined();
+  });
+
+  it("stores project_dir", () => {
+    const p = mergeProjectConfig({ project_id: "myapp", project_dir: "/home/user/myapp" });
+    expect(p.project_dir).toBe("/home/user/myapp");
+  });
+
+  it("derives display_name from project_id when not provided", () => {
+    const p = mergeProjectConfig({ project_id: "myapp" });
+    expect(p.display_name).toBe("myapp");
   });
 });
