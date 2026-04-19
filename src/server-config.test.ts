@@ -23,7 +23,7 @@ describe("mergeProjectConfig", () => {
     expect(p.project_id).toBe("myproj");
     expect(p.indexer_state).toBe("stopped");
     expect(p.include_paths).toEqual([]);
-    expect((p as Record<string, unknown>)["agent_id"]).toBeUndefined();
+    expect(Object.keys(p)).not.toContain("agent_id");
   });
 
   it("stores project_dir", () => {
