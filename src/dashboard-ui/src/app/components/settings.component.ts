@@ -18,16 +18,10 @@ import type { ProjectConfigData } from "../../types";
               (input)="patchProject('display_name', $any($event.target).value)" />
           </label>
           <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Agent name</span>
+            <span class="w-28 text-(--color-muted)">Project dir</span>
             <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              [value]="projectCfg()!.agent_id"
-              (input)="patchProject('agent_id', $any($event.target).value)" />
-          </label>
-          <label class="flex gap-2 items-center text-xs">
-            <span class="w-28 text-(--color-muted)">Project root</span>
-            <input class="flex-1 bg-(--color-surface) border border-(--color-border) rounded px-2 py-1 text-xs font-mono text-(--color-text)"
-              [value]="projectCfg()!.project_root"
-              (input)="patchProject('project_root', $any($event.target).value)" />
+              [value]="projectCfg()!.project_dir"
+              (input)="patchProject('project_dir', $any($event.target).value)" />
           </label>
           <label class="flex gap-2 items-start text-xs">
             <span class="w-28 text-(--color-muted) mt-1">Include paths</span>

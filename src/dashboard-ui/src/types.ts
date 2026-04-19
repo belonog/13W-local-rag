@@ -13,7 +13,6 @@ export interface RequestEntry {
   tool:      string;
   source:    "mcp" | "playground" | "watcher" | "hook";
   projectId?: string;
-  agentId?:   string;
   bytesIn:   number;
   bytesOut:  number;
   ms:        number;
@@ -41,7 +40,6 @@ export interface ToolSchemaDef {
 
 export interface ServerInfo {
   projectId: string;
-  agentId: string;
   version: string;
   branch: string;
   collectionPrefix: string;
@@ -94,7 +92,7 @@ export interface InitData {
   schemas:           ToolSchemaDef[];
   serverInfo:        ServerInfo;
   projects:          ProjectConfigData[];
-  agentConnections?: Record<string, { ts: number; agentId: string }>;
+  agentConnections?: Record<string, { ts: number }>;
 }
 
 export interface EmbedConfigData {
@@ -127,8 +125,7 @@ export interface ServerConfigData {
 export interface ProjectConfigData {
   project_id:    string;
   display_name:  string;
-  agent_id:      string;
-  project_root:  string;
+  project_dir:   string;
   include_paths: string[];
   indexer_state: string;
   created_at:    string;

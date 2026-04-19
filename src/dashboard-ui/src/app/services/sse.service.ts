@@ -15,7 +15,7 @@ export class SseService implements OnDestroy {
   readonly projects        = signal<ProjectConfigData[]>([]);
 
   /** Last MCP initialize handshake per projectId (agent connected). */
-  readonly agentConnections = signal<Record<string, { ts: number; agentId: string }>>({});
+  readonly agentConnections = signal<Record<string, { ts: number }>>({});
 
   private es: EventSource | null = null;
 
@@ -29,10 +29,10 @@ export class SseService implements OnDestroy {
     this.es = new EventSource("/events");
     this.es.onmessage = ({ data }: MessageEvent<string>) => {
       const msg = JSON.parse(data) as
-        | { type: "init";          stats: Record<string, ToolStats>; log: RequestEntry[]; agentConnections?: Record<string, { ts: number; agentId: string }> }
+        | { type: "init";          stats: Record<string, ToolStats>; log: RequestEntry[]; agentConnections?: Record<string, { ts: number }> }
         | { type: "entry";         stats: Record<string, ToolStats>; entry: RequestEntry }
-        | { type: "agent-connect";    projectId: string; agentId: string; ts: number }
-        | { type: "agent-disconnect"; projectId: string; agentId: string }
+        | { type: "agent-connect";    projectId: string; ts: number }
+        | { type: "agent-disconnect"; projectId: string }
         | { type: "reindex";          progress: ReindexProgress }
         | { type: "branch";        branch: string }
         | { type: "memory";        overview: OverviewData }
@@ -50,7 +50,7 @@ export class SseService implements OnDestroy {
       if (msg.type === "agent-connect") {
         this.agentConnections.update(prev => ({
           ...prev,
-          [msg.projectId]: { ts: msg.ts, agentId: msg.agentId },
+          [msg.projectId]: { ts: msg.ts },
         }));
       }
       if (msg.type === "agent-disconnect") {

@@ -119,7 +119,6 @@ export class PlaygroundComponent {
         tool: this.selectedTool(),
         args,
         project_id: this.projectId(),
-        agent_id: "playground"
       }),
     })
       .then(r => r.json() as Promise<RunResult>)

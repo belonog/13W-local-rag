@@ -69,16 +69,8 @@
         connecting…
       </span>
     } @else {
-      <span
-        class="inline-block text-xs px-2 py-0.5 rounded-full font-mono transition-colors duration-100"
-        [class]="agentStatus().state === 'active'
-          ? 'bg-(--color-sky)/12 text-(--color-sky)'
-          : 'bg-(--color-surface) text-(--color-muted)'">
-        @if (agentStatus().state === 'none') {
-          no agent
-        } @else {
-          agent · {{ fmtAgo(agentStatus().ts!) }}
-        }
+      <span class="inline-block text-xs px-2 py-0.5 rounded-full font-mono bg-(--color-surface) text-(--color-muted)">
+        connected
       </span>
     }
   </div>
