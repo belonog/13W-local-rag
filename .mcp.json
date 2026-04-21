@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "memory": {
+      "type": "http",
+      "url": "http://localhost:7531/mcp?project_dir=${CLAUDE_PROJECT_DIR}"
+    }
+  }
+}

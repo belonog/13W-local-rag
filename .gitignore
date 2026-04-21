@@ -6,6 +6,5 @@ dist/
 node_modules/
 src/dashboard-ui/.angular/
 types/
-.mcp.json
 .memory.json
 .worktrees/
