@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 export interface RequestCtx {
   projectId: string;
+  projectDir?: string;
 }
 
 const _store = new AsyncLocalStorage<RequestCtx>();
@@ -14,4 +15,8 @@ export function runWithContext<T>(ctx: RequestCtx, fn: () => T): T {
 
 export function getProjectId(): string {
   return _store.getStore()?.projectId ?? "default";
+}
+
+export function getProjectDir(): string | undefined {
+  return _store.getStore()?.projectDir;
 }

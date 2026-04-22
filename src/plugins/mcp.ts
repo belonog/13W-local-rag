@@ -115,7 +115,7 @@ async function handleMcpRequest(req: FastifyRequest, reply: FastifyReply): Promi
   const mcpServer = buildMcpServer(projectId);
   await mcpServer.connect(transport);
 
-  await requestContext.run({ projectId }, async () => {
+  await requestContext.run({ projectId, projectDir }, async () => {
     await transport.handleRequest(req.raw, reply.raw, req.body);
   });
 

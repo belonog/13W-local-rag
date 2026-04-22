@@ -1,6 +1,7 @@
 import { readdirSync, lstatSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cfg, getProjectId, getCurrentBranchCached } from "../config.js";
+import { getProjectDir } from "../request-context.js";
 import { qd, colName } from "../qdrant.js";
 import { topFilesByRevDeps } from "../storage.js";
 
@@ -159,7 +160,7 @@ async function getAllIndexedFilePaths(): Promise<string[]> {
 }
 
 export async function projectOverviewTool(): Promise<string> {
-  const root = resolve(cfg.projectDir || process.cwd());
+  const root = resolve(getProjectDir() || cfg.projectDir || process.cwd());
 
   const [tree, entryPoints, langStats, allFiles, collectionInfo] = await Promise.all([
     Promise.resolve(buildDirTree(root, 0, 3)),
